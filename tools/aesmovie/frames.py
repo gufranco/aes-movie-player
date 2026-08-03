@@ -11,6 +11,7 @@ is unchanged.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from collections.abc import Iterator
@@ -21,6 +22,10 @@ from typing import Final, Literal
 
 import numpy as np
 import numpy.typing as npt
+
+_MULTI_FIELDS: Final = re.compile(r"(TFF|BFF|Progressive|Undetermined):(\d+)")
+_ANALYSIS_SECONDS: Final = 8.0
+_CROP: Final = re.compile(r"crop=(\d+):(\d+):(\d+):(\d+)")
 
 VBLANK_FPS: Final = Fraction(6_000_000, 384 * 264)
 TARGET_WIDTH: Final = 320
@@ -146,6 +151,79 @@ def source_frames_kept(hold: int, source_fps: Fraction) -> float:
     return min(1.0, effective / float(source_fps))
 
 
+@dataclass(frozen=True, slots=True)
+class SourceAnalysis:
+    """What ffmpeg can tell us about a source before anything is baked."""
+
+    interlaced: bool
+    crop: tuple[int, int, int, int] | None
+
+
+def _run_filter(path: Path, filter_spec: str, *, start: float, duration: float) -> str:
+    """Run an analysis filter and hand back what it wrote to stderr."""
+    result = subprocess.run(
+        [
+            _require_tool("ffmpeg"),
+            "-hide_banner",
+            "-ss",
+            f"{start:.6f}",
+            "-i",
+            str(path),
+            "-t",
+            f"{duration:.6f}",
+            "-vf",
+            filter_spec,
+            "-an",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    return result.stderr
+
+
+def analyse(path: Path, *, start: float = 0.0, duration: float = 8.0) -> SourceAnalysis:
+    """Detect the two things that ruin a bake if they go unnoticed.
+
+    Interlaced fields woven into a progressive frame become permanent
+    comb artifacts once they are quantised into character ROM, and black
+    bars spend the raster on nothing. Both are cheap to detect up front
+    and impossible to undo afterwards.
+
+    A crop is only reported when it actually reduces the frame, since
+    cropdetect names the full frame when it finds no bars at all.
+    """
+    path = Path(path)
+    verdict = _run_filter(path, "idet", start=start, duration=duration)
+    interlaced = False
+    for line in verdict.splitlines():
+        if "Multi frame detection" in line:
+            fields = dict(_MULTI_FIELDS.findall(line.replace(" ", "")))
+            woven = int(fields.get("TFF", 0)) + int(fields.get("BFF", 0))
+            progressive = int(fields.get("Progressive", 0))
+            interlaced = woven > progressive
+
+    bars = _run_filter(path, "cropdetect=limit=24:round=2", start=start, duration=duration)
+    crop: tuple[int, int, int, int] | None = None
+    matches = _CROP.findall(bars)
+    if matches:
+        width, height, left, top = (int(value) for value in matches[-1])
+        info = probe(path)
+        if width < info.width or height < info.height:
+            crop = (width, height, left, top)
+    return SourceAnalysis(interlaced=interlaced, crop=crop)
+
+
+def _analysed_size(info: VideoInfo, analysis: SourceAnalysis) -> tuple[int, int]:
+    """The frame size after black bars are removed."""
+    if analysis.crop is None:
+        return info.width, info.height
+    return analysis.crop[0], analysis.crop[1]
+
+
 def _even(value: int) -> int:
     return value - (value % 2)
 
@@ -199,6 +277,9 @@ def build_filter(
     fps: Fraction = VBLANK_FPS,
     denoise: float = 0.0,
     motion_blur: int = 0,
+    *,
+    deinterlace: bool = False,
+    pre_crop: tuple[int, int, int, int] | None = None,
 ) -> str:
     """Build the ffmpeg filter chain for a planned geometry.
 
@@ -209,7 +290,13 @@ def build_filter(
     crop_w, crop_h = geometry.crop
     image_w, image_h = geometry.image
     target_w, target_h = geometry.target
-    stages = [
+    stages = []
+    if deinterlace:
+        stages.append("yadif=mode=0:parity=-1:deint=0")
+    if pre_crop is not None:
+        bar_w, bar_h, bar_x, bar_y = pre_crop
+        stages.append(f"crop={bar_w}:{bar_h}:{bar_x}:{bar_y}")
+    stages += [
         f"crop={crop_w}:{crop_h}",
         f"scale={image_w}:{image_h}:flags=lanczos",
     ]
@@ -237,7 +324,9 @@ def decode(
 ) -> npt.NDArray[np.uint8]:
     """Decode a clip window into vblank-rate RGB frames."""
     info = probe(path)
-    geometry = plan_geometry(info.width, info.height, target_width, target_height, fit=fit)
+    analysis = analyse(path, start=start, duration=min(duration, _ANALYSIS_SECONDS))
+    width, height = _analysed_size(info, analysis)
+    geometry = plan_geometry(width, height, target_width, target_height, fit=fit)
     wanted = frame_count(seconds=duration)
     result = subprocess.run(
         [
@@ -251,7 +340,13 @@ def decode(
             "-t",
             f"{duration:.6f}",
             "-vf",
-            build_filter(geometry, denoise=denoise, motion_blur=motion_blur),
+            build_filter(
+                geometry,
+                denoise=denoise,
+                motion_blur=motion_blur,
+                deinterlace=analysis.interlaced,
+                pre_crop=analysis.crop,
+            ),
             "-an",
             "-sn",
             "-f",
@@ -295,7 +390,9 @@ def _decode_process(
     motion_blur: int,
 ) -> subprocess.Popen[bytes]:
     info = probe(path)
-    geometry = plan_geometry(info.width, info.height, target_width, target_height, fit=fit)
+    analysis = analyse(path, start=start, duration=min(duration, _ANALYSIS_SECONDS))
+    width, height = _analysed_size(info, analysis)
+    geometry = plan_geometry(width, height, target_width, target_height, fit=fit)
     return subprocess.Popen(
         [
             _require_tool("ffmpeg"),
@@ -308,7 +405,13 @@ def _decode_process(
             "-t",
             f"{duration:.6f}",
             "-vf",
-            build_filter(geometry, denoise=denoise, motion_blur=motion_blur),
+            build_filter(
+                geometry,
+                denoise=denoise,
+                motion_blur=motion_blur,
+                deinterlace=analysis.interlaced,
+                pre_crop=analysis.crop,
+            ),
             "-an",
             "-sn",
             "-f",
