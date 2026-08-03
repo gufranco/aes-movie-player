@@ -20,14 +20,76 @@ from pathlib import Path
 from typing import Any, Final
 
 import numpy as np
+import numpy.typing as npt
 
-from aesmovie import crom, encode, fixtiles, frames, neocolor
+from aesmovie import adpcmb, crom, encode, fixtiles, frames, neocolor
 
 SECONDS_PER_MINUTE: Final = 60.0
 CROM_BANK_BYTES: Final = 128 << 20
 ADPCM_B_BYTES: Final = 16 << 20
+V_ROM_MIN_BYTES: Final = 1 << 19
 FIX_PALETTE_BANK: Final = 1
 S_ROM_BYTES: Final = 131072
+
+
+def has_audio_stream(source: Path) -> bool:
+    """True when the source carries at least one audio stream."""
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=index",
+            "-of",
+            "csv=p=0",
+            str(source),
+        ],
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    return bool(result.stdout.strip())
+
+
+def _decode_audio(
+    source: Path, start: float, duration: float, rate_hz: float
+) -> npt.NDArray[np.int16]:
+    """Decode the source soundtrack to mono 16-bit at the target rate.
+
+    A source with no audio track is a normal input, not a failure, so
+    this reports an empty signal and the bake simply omits the voice ROM.
+    """
+    if not has_audio_stream(source):
+        return np.zeros(0, dtype=np.int16)
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-ss",
+            f"{start:.6f}",
+            "-i",
+            str(source),
+            "-t",
+            f"{duration:.6f}",
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(int(rate_hz)),
+            "-f",
+            "s16le",
+            "-acodec",
+            "pcm_s16le",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+    )
+    return np.frombuffer(result.stdout, dtype="<i2")
 
 
 def _fix_defines() -> str:
@@ -98,6 +160,8 @@ class BakeRequest:
     sample_stride: int = 8
     seed: int = 0
     preview: Path | None = None
+    audio_rate_hz: float = 22050.0
+    audio: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +251,27 @@ def _preview_codec(path: Path) -> list[str]:
     return ["-c:v", "libx264", "-preset", "medium", "-crf", "16", "-pix_fmt", "yuv420p"]
 
 
+def _write_audio_params(build_dir: Path, encoded: adpcmb.EncodedAudio) -> Path:
+    """Emit the ADPCM-B register values the Z80 driver assembles against."""
+    generated = build_dir / "generated"
+    generated.mkdir(parents=True, exist_ok=True)
+    path = generated / "audio_params.s"
+    path.write_text(
+        "\n".join(
+            [
+                f"    ADPCM_B_START_LO = 0x{encoded.start_address & 0xFF:02x}",
+                f"    ADPCM_B_START_HI = 0x{(encoded.start_address >> 8) & 0xFF:02x}",
+                f"    ADPCM_B_END_LO = 0x{encoded.end_address & 0xFF:02x}",
+                f"    ADPCM_B_END_HI = 0x{(encoded.end_address >> 8) & 0xFF:02x}",
+                f"    ADPCM_B_DELTA_LO = 0x{encoded.delta_n & 0xFF:02x}",
+                f"    ADPCM_B_DELTA_HI = 0x{(encoded.delta_n >> 8) & 0xFF:02x}",
+                "",
+            ]
+        )
+    )
+    return path
+
+
 def _write_preview(path: Path, rendered: np.ndarray) -> None:
     if rendered.shape[0] == 0:
         msg = "preview requested but no rendered frames were collected"
@@ -265,6 +350,17 @@ def run(request: BakeRequest) -> BakeOutcome:
         data = blob if len(blob) % 2 == 0 else blob + b"\x00"
         path.write_bytes(data)
         artifacts[key] = path
+
+    if request.audio:
+        samples = _decode_audio(
+            request.source, request.start, request.duration, request.audio_rate_hz
+        )
+        if samples.size:
+            encoded = adpcmb.encode(samples, rate_hz=request.audio_rate_hz)
+            voice = adpcmb.build_rom(encoded, pad_to=max(V_ROM_MIN_BYTES, len(encoded.payload)))
+            (baked / "v2.bin").write_bytes(voice)
+            artifacts["voice"] = baked / "v2.bin"
+            _write_audio_params(request.build_dir, encoded)
 
     asm, header = _write_sources(request.build_dir, artifacts, result)
     artifacts["asm"] = asm

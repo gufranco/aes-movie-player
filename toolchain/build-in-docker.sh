@@ -80,16 +80,31 @@ truncate -s "$FIXED_ROM_BYTES" "$ROM/p1.p1"
 cat "$BAKED/stream.bin" >> "$ROM/p1.p1"
 dd if="$ROM/p1.p1" of="$ROM/p1.p1" conv=notrunc,swab status=none
 
-cp /usr/share/ngdevkit/nullsound_driver.ihx "$ROM/m1.ihx"
-z80-neogeo-ihx-sdobjcopy -I ihex -O binary "$ROM/m1.ihx" "$ROM/m1.m1" --pad-to 131072
+if [[ -f "$GENERATED/audio_params.s" ]]; then
+    echo "AS src/sound.s"
+    z80-neogeo-ihx-sdasz80 -o "$BUILD/sound.rel" src/sound.s
+    z80-neogeo-ihx-sdldz80 -n -i "$BUILD/sound.ihx" "$BUILD/sound.rel"
+    z80-neogeo-ihx-sdobjcopy -I ihex -O binary "$BUILD/sound.ihx" "$ROM/m1.m1" --pad-to 131072
+else
+    cp /usr/share/ngdevkit/nullsound_driver.ihx "$ROM/m1.ihx"
+    z80-neogeo-ihx-sdobjcopy -I ihex -O binary "$ROM/m1.ihx" "$ROM/m1.m1" --pad-to 131072
+    rm -f "$ROM/m1.ihx"
+fi
 
 cp "$BAKED/fix.s1" "$ROM/s1.s1"
 : > "$ROM/v11.v1"
 truncate -s 524288 "$ROM/v11.v1"
 
+if [[ -f "$BAKED/v2.bin" ]]; then
+    cp "$BAKED/v2.bin" "$ROM/v21.v2"
+    echo "[audio] ADPCM-B voice ROM $(stat -c %s "$ROM/v21.v2") bytes"
+else
+    rm -f "$ROM/v21.v2"
+fi
+
 cp "$BAKED/c1.bin" "$ROM/c1.c1"
 cp "$BAKED/c2.bin" "$ROM/c2.c2"
-rm -f "$ROM/p1.raw" "$ROM/m1.ihx"
+rm -f "$ROM/p1.raw"
 
 echo "[rom] sizes:"
 ls -la "$ROM"

@@ -174,6 +174,8 @@ The baker lives under `tools/`, the cart under `src/`, and every generated artif
 | `src/menu.c` | fix-layer transport overlay, auto-hiding |
 | `tools/aesmovie/fixtiles.py` | generates the S-ROM glyphs the overlay draws with |
 | `tools/aesmovie/neofile.py` | streams the .neo cart container, replacing neosdconv |
+| `tools/aesmovie/adpcmb.py` | mono ADPCM-B encoder for the YM2610 voice ROM |
+| `src/sound.s` | Z80 driver that starts and loops the ADPCM-B soundtrack |
 | `src/movie_data.S` | links the baked blobs into the ROM |
 | `toolchain/build-in-docker.sh` | ngdevkit build and .neo packaging |
 | `tools/scripts/capture_rom.sh` | headless geolith capture |

@@ -17,11 +17,13 @@ from aesmovie import neofile
 HEADER_BYTES = 4096
 
 
-def write_regions(directory, *, p=b"", s=b"", m=b"", v1=b"", c1=b"", c2=b""):
+def write_regions(directory, *, p=b"", s=b"", m=b"", v1=b"", v2=None, c1=b"", c2=b""):
     (directory / "p1.p1").write_bytes(p)
     (directory / "s1.s1").write_bytes(s)
     (directory / "m1.m1").write_bytes(m)
     (directory / "v11.v1").write_bytes(v1)
+    if v2 is not None:
+        (directory / "v21.v2").write_bytes(v2)
     (directory / "c1.c1").write_bytes(c1)
     (directory / "c2.c2").write_bytes(c2)
     return directory
@@ -165,3 +167,40 @@ class TestStreaming:
         expected[0::2] = c1
         expected[1::2] = c2
         assert out.read_bytes()[HEADER_BYTES:] == bytes(expected)
+
+
+class TestSecondVoiceRegion:
+    def test_the_second_voice_region_is_declared_when_present(self, tmp_path):
+        rom = write_regions(tmp_path, v1=b"\x01\x02", v2=b"\x0a\x0b\x0c", c1=b"\x01", c2=b"\x02")
+        out = tmp_path / "voice.neo"
+
+        neofile.write_neo(rom_dir=rom, output=out)
+
+        assert read_header(out)["v2sz"] == 3
+
+    def test_the_second_voice_region_follows_the_first(self, tmp_path):
+        rom = write_regions(tmp_path, v1=b"\x01\x02", v2=b"\x0a\x0b\x0c", c1=b"\x01", c2=b"\x02")
+        out = tmp_path / "voice.neo"
+
+        neofile.write_neo(rom_dir=rom, output=out)
+
+        header = read_header(out)
+        offset = HEADER_BYTES + header["psz"] + header["ssz"] + header["msz"]
+        assert out.read_bytes()[offset : offset + 5] == b"\x01\x02\x0a\x0b\x0c"
+
+    def test_the_character_region_still_follows_both_voices(self, tmp_path):
+        rom = write_regions(tmp_path, v1=b"\x01", v2=b"\x0a", c1=b"\xf0", c2=b"\x0f")
+        out = tmp_path / "voice.neo"
+
+        neofile.write_neo(rom_dir=rom, output=out)
+
+        header = read_header(out)
+        offset = (
+            HEADER_BYTES
+            + header["psz"]
+            + header["ssz"]
+            + header["msz"]
+            + header["v1sz"]
+            + header["v2sz"]
+        )
+        assert out.read_bytes()[offset : offset + 2] == b"\xf0\x0f"

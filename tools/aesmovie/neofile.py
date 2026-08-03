@@ -10,7 +10,9 @@ The layout was recovered from a known-good neosdconv file and
 cross-checked against geolith's `geo_neo_load`. A 4096-byte header holds
 a magic tag, six little-endian region sizes, four metadata words, a
 33-byte name and a 17-byte manufacturer. The regions follow in the order
-P, S, M, V1, V2, C. The character region is the two ROM halves
+P, S, M, V1, V2, C. A `v21.v2` file is optional: when present it becomes
+the ADPCM-B region, and when absent the loader points ADPCM-B at the
+ADPCM-A data instead. The character region is the two ROM halves
 interleaved byte by byte, which is what the LSPC tile decoder expects.
 
 This module imports only the standard library so the build can run it
@@ -41,6 +43,7 @@ REGION_FILES: Final = {
     "c1": "c1.c1",
     "c2": "c2.c2",
 }
+OPTIONAL_REGION_FILES: Final = {"v2": "v21.v2"}
 
 
 def _require(rom_dir: Path, key: str) -> Path:
@@ -121,6 +124,9 @@ def write_neo(
     """Assemble the cart regions into a .neo container."""
     rom_dir = Path(rom_dir)
     paths = {key: _require(rom_dir, key) for key in REGION_FILES}
+    voice_two = rom_dir / OPTIONAL_REGION_FILES["v2"]
+    if voice_two.is_file():
+        paths["v2"] = voice_two
     sizes = {key: path.stat().st_size for key, path in paths.items()}
     if sizes["c1"] != sizes["c2"]:
         msg = f"character halves must be the same size, got {sizes['c1']} and {sizes['c2']}"
@@ -131,7 +137,7 @@ def write_neo(
         ssz=sizes["s"],
         msz=sizes["m"],
         v1sz=sizes["v1"],
-        v2sz=0,
+        v2sz=sizes.get("v2", 0),
         csz=sizes["c1"] + sizes["c2"],
         name=name,
         manufacturer=manufacturer,
@@ -145,8 +151,9 @@ def write_neo(
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("wb") as target:
         target.write(header)
-        for key in ("p", "s", "m", "v1"):
-            _copy(paths[key], target, chunk_bytes)
+        for key in ("p", "s", "m", "v1", "v2"):
+            if key in paths:
+                _copy(paths[key], target, chunk_bytes)
         _interleave(paths["c1"], paths["c2"], target, chunk_bytes)
     return output
 

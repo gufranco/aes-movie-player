@@ -311,3 +311,141 @@ class TestRenderCollection:
         )
 
         assert outcome.result.rendered.shape[0] == outcome.result.stats.frames
+
+
+class TestAudio:
+    def test_a_source_without_audio_is_detected(self, synthetic_clip):
+        assert bake.has_audio_stream(synthetic_clip) is False
+
+    def test_a_silent_source_bakes_without_a_voice_rom(self, synthetic_clip, tmp_path):
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=synthetic_clip,
+                start=0.0,
+                duration=0.2,
+                build_dir=tmp_path / "build",
+                palette_count=4,
+                candidates=0,
+                sample_stride=1,
+            )
+        )
+
+        assert "voice" not in outcome.artifacts
+        assert not (outcome.build_dir / "baked" / "v2.bin").exists()
+
+    def test_a_source_with_audio_produces_a_voice_rom(self, tmp_path):
+        source = tmp_path / "tone.mp4"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x240:rate=24:duration=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1",
+                "-pix_fmt",
+                "yuv420p",
+                "-shortest",
+                str(source),
+            ],
+            check=True,
+        )
+
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=source,
+                start=0.0,
+                duration=0.3,
+                build_dir=tmp_path / "build",
+                palette_count=4,
+                candidates=0,
+                sample_stride=1,
+            )
+        )
+
+        assert (outcome.build_dir / "baked" / "v2.bin").is_file()
+
+    def test_the_audio_parameters_are_emitted_for_the_z80(self, tmp_path):
+        source = tmp_path / "tone2.mp4"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x240:rate=24:duration=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1",
+                "-pix_fmt",
+                "yuv420p",
+                "-shortest",
+                str(source),
+            ],
+            check=True,
+        )
+
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=source,
+                start=0.0,
+                duration=0.3,
+                build_dir=tmp_path / "build",
+                palette_count=4,
+                candidates=0,
+                sample_stride=1,
+            )
+        )
+
+        params = (outcome.build_dir / "generated" / "audio_params.s").read_text()
+        for name in ("ADPCM_B_START_LO", "ADPCM_B_END_HI", "ADPCM_B_DELTA_LO"):
+            assert name in params
+
+    def test_audio_can_be_switched_off(self, tmp_path):
+        source = tmp_path / "tone3.mp4"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x240:rate=24:duration=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1",
+                "-pix_fmt",
+                "yuv420p",
+                "-shortest",
+                str(source),
+            ],
+            check=True,
+        )
+
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=source,
+                start=0.0,
+                duration=0.3,
+                build_dir=tmp_path / "build",
+                palette_count=4,
+                candidates=0,
+                sample_stride=1,
+                audio=False,
+            )
+        )
+
+        assert not (outcome.build_dir / "baked" / "v2.bin").exists()
