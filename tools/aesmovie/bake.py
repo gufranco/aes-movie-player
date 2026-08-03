@@ -29,7 +29,7 @@ from typing import Any, Final
 import numpy as np
 import numpy.typing as npt
 
-from aesmovie import adpcmb, encode, fixtiles, frames, neocolor
+from aesmovie import adpcmb, calibrate, encode, fixtiles, frames, neocolor, quality
 
 SECONDS_PER_MINUTE: Final = 60.0
 CROM_BANK_BYTES: Final = 128 << 20
@@ -520,21 +520,23 @@ def run(request: BakeRequest) -> BakeOutcome:
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bake a video clip into Neo Geo cart data.")
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--quality", default=None)
+    parser.add_argument("--audio-rate", type=float, default=None)
     parser.add_argument("--start", type=float, default=0.0)
     parser.add_argument("--duration", type=float, required=True)
     parser.add_argument("--build-dir", type=Path, default=Path("build"))
     parser.add_argument("--fit", choices=("fill", "letterbox"), default="fill")
-    parser.add_argument("--denoise", type=float, default=0.0)
-    parser.add_argument("--frame-hold", type=int, default=1)
+    parser.add_argument("--denoise", type=float, default=None)
+    parser.add_argument("--frame-hold", type=int, default=None)
     parser.add_argument("--motion-blur", type=int, default=0)
     parser.add_argument("--target-fps", type=float, default=None)
     parser.add_argument("--motion-masking", type=float, default=0.0)
-    parser.add_argument("--chroma-weight", type=float, default=1.0)
+    parser.add_argument("--chroma-weight", type=float, default=None)
     parser.add_argument("--scene-cut-floor", type=float, default=0.01)
     parser.add_argument("--palette-count", type=int, default=240)
     parser.add_argument("--base-bank", type=int, default=16)
     parser.add_argument("--keyframe-interval", type=int, default=90)
-    parser.add_argument("--tolerance", type=float, default=0.0005)
+    parser.add_argument("--tolerance", type=float, default=None)
     parser.add_argument("--scene-cut-ratio", type=float, default=0.90)
     parser.add_argument("--candidates", type=int, default=12)
     parser.add_argument("--flip", action="store_true")
@@ -545,7 +547,60 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _resolve_frame_hold(args: argparse.Namespace) -> int:
+def _resolve_quality(args: argparse.Namespace) -> quality.Tier | None:
+    """Pick the tier, measuring the source when asked to choose.
+
+    `auto` calibrates and reports before anything is baked, because the
+    choice it makes is the one worth arguing with, and a bake is far too
+    slow to be the place that argument happens.
+    """
+    if args.quality is None:
+        return None
+    info = frames.probe(args.source)
+    minutes = min(args.duration, max(0.0, info.duration - args.start))
+    minutes /= quality.SECONDS_PER_MINUTE
+    if args.quality != "auto":
+        return quality.tier_by_name(args.quality)
+
+    rate = calibrate.measure_reference_rate(
+        args.source, fit=args.fit, seed=args.seed, start=args.start, duration=args.duration
+    )
+    print(
+        quality.format_plan(
+            source=str(args.source),
+            minutes=minutes,
+            width=info.width,
+            height=info.height,
+            source_fps=float(info.fps),
+            has_audio=has_audio_stream(args.source),
+            reference_rate=rate,
+            vblank_fps=float(frames.VBLANK_FPS),
+        ),
+        file=sys.stderr,
+    )
+    chosen = quality.select(minutes, rate)
+    if chosen is None:
+        cheapest = quality.survey(minutes, rate)[-1]
+        msg = (
+            f"this source does not fit at any quality tier; trim "
+            f"{quality.clock(cheapest.trim_minutes)} and bake again"
+        )
+        raise SystemExit(msg)
+    return chosen.tier
+
+
+def _pick[Knob: (int, float)](
+    explicit: Knob | None, tier_value: Knob | None, fallback: Knob
+) -> Knob:
+    """An explicit flag wins, then the tier, then the built-in default."""
+    if explicit is not None:
+        return explicit
+    if tier_value is not None:
+        return tier_value
+    return fallback
+
+
+def _resolve_frame_hold(args: argparse.Namespace, tier: quality.Tier | None) -> int:
     """Turn a wanted frame rate into a hold, and reject a hold that does nothing.
 
     A hold counts display refreshes while the interesting quantity is
@@ -555,7 +610,7 @@ def _resolve_frame_hold(args: argparse.Namespace) -> int:
     costing temporal accuracy. That is worth an error rather than a
     silent no-op.
     """
-    hold = int(args.frame_hold)
+    hold = int(_pick(args.frame_hold, tier.frame_hold if tier else None, 1))
     if args.target_fps is not None:
         hold = frames.hold_for_target_fps(args.target_fps)
     if hold <= 1:
@@ -574,7 +629,11 @@ def _resolve_frame_hold(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    frame_hold = _resolve_frame_hold(args)
+    tier = _resolve_quality(args)
+    frame_hold = _resolve_frame_hold(args, tier)
+    audio_rate = args.audio_rate
+    if audio_rate is None:
+        audio_rate = quality.audio_hz_for(args.duration / quality.SECONDS_PER_MINUTE)
     outcome = run(
         BakeRequest(
             source=args.source,
@@ -582,22 +641,23 @@ def main(argv: list[str] | None = None) -> int:
             duration=args.duration,
             build_dir=args.build_dir,
             fit=args.fit,
-            denoise=args.denoise,
+            denoise=_pick(args.denoise, tier.denoise if tier else None, 0.0),
             frame_hold=frame_hold,
             motion_blur=args.motion_blur,
             motion_masking=args.motion_masking,
-            chroma_weight=args.chroma_weight,
+            chroma_weight=_pick(args.chroma_weight, tier.chroma_weight if tier else None, 1.0),
             scene_cut_floor=args.scene_cut_floor,
             palette_count=args.palette_count,
             base_bank=args.base_bank,
             keyframe_interval=args.keyframe_interval,
-            tolerance=args.tolerance,
+            tolerance=_pick(args.tolerance, tier.tolerance if tier else None, 0.0005),
             scene_cut_ratio=args.scene_cut_ratio,
             candidates=args.candidates,
             allow_flip=args.flip,
             sample_stride=args.sample_stride,
             seed=args.seed,
             preview=args.preview,
+            audio_rate_hz=audio_rate,
         )
     )
     report = outcome.report()

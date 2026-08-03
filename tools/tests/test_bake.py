@@ -246,7 +246,26 @@ class TestCommandLine:
     def test_the_defaults_are_the_measured_settings(self):
         args = bake._parse_args(["--source", "clip.mp4", "--duration", "1"])
 
-        assert (args.scene_cut_ratio, args.tolerance, args.keyframe_interval) == (0.90, 0.0005, 90)
+        assert (args.scene_cut_ratio, args.keyframe_interval) == (0.90, 90)
+
+    def test_a_tier_controlled_knob_is_unset_until_resolved(self):
+        args = bake._parse_args(["--source", "clip.mp4", "--duration", "1"])
+
+        assert (args.tolerance, args.chroma_weight, args.frame_hold, args.denoise) == (
+            None,
+            None,
+            None,
+            None,
+        )
+
+    def test_an_unset_knob_falls_back_to_the_built_in_default(self):
+        assert bake._pick(None, None, 0.0005) == 0.0005
+
+    def test_a_tier_value_beats_the_built_in_default(self):
+        assert bake._pick(None, 0.25, 1.0) == 0.25
+
+    def test_an_explicit_flag_beats_the_tier(self):
+        assert bake._pick(0.9, 0.25, 1.0) == 0.9
 
     def test_main_writes_a_report_and_reports_success(self, synthetic_clip, tmp_path, capsys):
         report = tmp_path / "report.json"
