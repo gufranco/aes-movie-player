@@ -3,13 +3,17 @@
 #include "hw.h"
 #include "movie_data.h"
 
-#define MENU_TOP_ROW    24
+/* The fix layer is 32 rows but the raster only shows rows 2 to 29, so the
+ * panel is anchored to row 29 rather than to the nominal bottom. Sitting it
+ * any higher leaves a band of video below the overlay. */
+#define MENU_LAST_ROW   29
 #define MENU_ROWS       4
+#define MENU_TOP_ROW    (MENU_LAST_ROW - MENU_ROWS + 1)
 #define MENU_COLS       40
 
-#define MENU_EDGE_ROW   24
-#define MENU_BAR_ROW    25
-#define MENU_TEXT_ROW   27
+#define MENU_EDGE_ROW   MENU_TOP_ROW
+#define MENU_BAR_ROW    (MENU_TOP_ROW + 1)
+#define MENU_TEXT_ROW   (MENU_TOP_ROW + 3)
 
 #define MENU_MARGIN     2
 #define MENU_BAR_COL    MENU_MARGIN
