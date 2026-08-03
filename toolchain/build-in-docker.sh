@@ -53,6 +53,7 @@ CFLAGS=(
     $(pkg-config --cflags ngdevkit)
     -Isrc
     -I"$GENERATED"
+    -I"$BAKED"
     -std=c99 -fomit-frame-pointer -O2 -g
     -Wall -Wextra -Werror
 )

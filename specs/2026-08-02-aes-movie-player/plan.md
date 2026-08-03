@@ -322,11 +322,40 @@ Runtime is the C-ROM ceiling of 128 MiB divided by the measured tile rate.
 | + frame hold 4, blend width 4 | 41,077 | 8.5 min | 11.41 |
 | + frame hold 4, blend width 8 | 41,989 | 8.3 min | 9.11 |
 
-Blending is the highest-value lever measured. At a fixed hold of 4 it
-costs about 6% more tiles and cuts the error from 23.33 to 9.11, because
-a blended frame carries less high-frequency detail and so reuses more
-dictionary entries, paying for most of itself. This is the bake-time
-equivalent of the RDP cross-fade Angel Studios ran at playback time.
+### Blending was rejected on sight, and the metric was wrong about it
+
+`displayed_error` ranked blending as the best lever on the table: at a
+fixed hold of 4 it took the error from 23.33 down to 9.11. Viewed on the
+cart it was rejected immediately as smeared, and the viewer is the
+authority this whole exercise is trying to satisfy.
+
+The metric is wrong here for a structural reason worth remembering. It
+scores each displayed frame by its distance to the true source frame,
+and an average of the frames around that instant really is closer, on
+that measure, than a stale frame is. Human vision does not integrate a
+135 ms smear into an average, it reads it as an artifact. So the number
+improves while the picture gets worse, and no amount of tuning the
+weight fixes that, because the disagreement is about what is being
+measured rather than by how much.
+
+Two consequences. Blending stays at a default of zero, and
+`displayed_error` is never the deciding evidence for a temporal lever
+again. It remains sound for spatial choices, where it agrees with what
+the eye reports.
+
+The rejection cost nothing. Blending was adding tiles, so removing it
+made the picture sharper and the movie slightly longer at the same time:
+at a hold of 4, 41,989 tiles with a blend width of 8 against 39,644
+without. The only thing it bought was judder concealment, which now has
+to be paid for by choosing a frame hold the viewer accepts unaided.
+
+### Blur-free profiles, 45 s of real footage
+
+| Profile | Effective fps | Tiles | Max runtime |
+|---|---|---|---|
+| Sharp | 59.2 | 140,191 | 5.6 min |
+| Hold 3 | 19.7 | 118,731 | 6.6 min |
+| Hold 4 | 14.8 | 94,408 | 8.3 min |
 
 Frame hold must be chosen against the source frame rate, not in the
 abstract. A 24 fps source arriving at the 59.185 Hz refresh already

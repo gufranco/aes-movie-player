@@ -102,6 +102,13 @@ class TestGeneratedSources:
         for name in ("index.bin", "keyframes.bin", "palettes.bin"):
             assert name in text
 
+    def test_the_stub_names_blobs_without_a_path(self, baked):
+        text = (baked.build_dir / "generated" / "movie_data.S").read_text()
+
+        assert '.incbin "index.bin"' in text
+        assert str(baked.build_dir) not in text
+        assert "/" not in text.split(".incbin")[1].split("\n")[0]
+
     def test_the_stream_is_not_linked_into_the_image(self, baked):
         text = (baked.build_dir / "generated" / "movie_data.S").read_text()
 

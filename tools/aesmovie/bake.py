@@ -5,6 +5,12 @@ generated sources under `build/generated/`. Large blobs reach the ROM
 through `.incbin` in an assembly stub rather than as C arrays, because a
 multi-megabyte C array costs minutes of compile time and buys nothing.
 
+The stub names those blobs by filename alone and leaves the assembler
+to find them on its include path, so the build passes `-I` for the baked
+directory. Writing the path the baker happened to use would pin the
+sources to one machine, and a bake taken from anywhere but the build
+tree would fail to assemble.
+
 The preview output re-encodes the decoded picture at the vblank rate, so
 the quantization can be judged in motion without booting a cart.
 """
@@ -271,7 +277,7 @@ def _write_sources(
         ("movie_palettes", "palettes"),
         ("movie_fix_palette", "fixpal"),
     ):
-        body += _ASM_ENTRY.format(symbol=symbol, path=outcome_paths[key].as_posix())
+        body += _ASM_ENTRY.format(symbol=symbol, path=outcome_paths[key].name)
     asm.write_text(body)
 
     header = generated / "movie_data.h"
