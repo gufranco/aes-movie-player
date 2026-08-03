@@ -169,7 +169,10 @@ The baker lives under `tools/`, the cart under `src/`, and every generated artif
 | `tools/aesmovie/bake.py` | CLI that drives the passes and reports sizes |
 | `tools/tests/` | unit tests for the pure encoders |
 | `src/hw.h` | LSPC, CRAM, and SCB helpers |
-| `src/main.c` | vblank-driven player |
+| `src/main.c` | vblank-driven player and transport state machine |
+| `src/menu.h` | fix-layer overlay interface |
+| `src/menu.c` | fix-layer transport overlay, auto-hiding |
+| `tools/aesmovie/fixtiles.py` | generates the S-ROM glyphs the overlay draws with |
 | `src/movie_data.S` | links the baked blobs into the ROM |
 | `toolchain/build-in-docker.sh` | ngdevkit build and .neo packaging |
 | `tools/scripts/capture_rom.sh` | headless geolith capture |

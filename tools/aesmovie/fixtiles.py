@@ -1,0 +1,285 @@
+"""Glyphs for the fix-layer transport overlay.
+
+The fix layer draws 8x8 tiles from the S-ROM over the sprite layer, so
+the overlay costs no sprites and never disturbs the video grid. A tile
+is 32 bytes of 4bpp pixels, two per byte with the low nibble on the
+left, and the four column pairs are stored in the order 0x10, 0x18,
+0x00, 0x08. The layout is the one geolith's `geo_lspc_fixline_default`
+reads.
+
+Glyphs are drawn as text art rather than loaded from a font file, which
+keeps the cart free of any font licensing question and keeps the shapes
+editable in place. Index 0 of a fix palette is transparent, so the
+overlay paints its own opaque panel behind the text instead of relying
+on whatever video happens to be underneath.
+"""
+
+from __future__ import annotations
+
+from typing import Final
+
+from aesmovie.neocolor import pack_palette_word
+
+TILE_PX: Final = 8
+TILE_BYTES: Final = 32
+COLUMN_PAIR_OFFSETS: Final = (0x10, 0x18, 0x00, 0x08)
+MAX_TILE_INDEX: Final = 0x1000
+
+TRANSPARENT: Final = 0
+INK: Final = 1
+PANEL: Final = 2
+ACCENT: Final = 3
+
+_INK_COLOR: Final = (31, 31, 31)
+_PANEL_COLOR: Final = (2, 2, 5)
+_ACCENT_COLOR: Final = (31, 24, 4)
+
+_PIXEL_CODES: Final = {".": PANEL, "#": INK, "*": ACCENT, " ": TRANSPARENT}
+
+_ART: Final[dict[str, tuple[str, ...]]] = {
+    "blank": ("        ",) * 8,
+    "panel": ("........",) * 8,
+    "0": (
+        "........",
+        "..####..",
+        ".##..##.",
+        ".##..##.",
+        ".##..##.",
+        ".##..##.",
+        "..####..",
+        "........",
+    ),
+    "1": (
+        "........",
+        "...##...",
+        "..###...",
+        "...##...",
+        "...##...",
+        "...##...",
+        "..####..",
+        "........",
+    ),
+    "2": (
+        "........",
+        "..####..",
+        ".##..##.",
+        "....##..",
+        "...##...",
+        "..##....",
+        ".######.",
+        "........",
+    ),
+    "3": (
+        "........",
+        ".#####..",
+        "....##..",
+        "...###..",
+        "....##..",
+        ".##..##.",
+        "..####..",
+        "........",
+    ),
+    "4": (
+        "........",
+        "...###..",
+        "..####..",
+        ".##.##..",
+        ".######.",
+        "....##..",
+        "....##..",
+        "........",
+    ),
+    "5": (
+        "........",
+        ".######.",
+        ".##.....",
+        ".#####..",
+        "....##..",
+        ".##..##.",
+        "..####..",
+        "........",
+    ),
+    "6": (
+        "........",
+        "..####..",
+        ".##..##.",
+        ".#####..",
+        ".##..##.",
+        ".##..##.",
+        "..####..",
+        "........",
+    ),
+    "7": (
+        "........",
+        ".######.",
+        "....##..",
+        "...##...",
+        "..##....",
+        "..##....",
+        "..##....",
+        "........",
+    ),
+    "8": (
+        "........",
+        "..####..",
+        ".##..##.",
+        "..####..",
+        ".##..##.",
+        ".##..##.",
+        "..####..",
+        "........",
+    ),
+    "9": (
+        "........",
+        "..####..",
+        ".##..##.",
+        ".##..##.",
+        "..#####.",
+        "....##..",
+        "..####..",
+        "........",
+    ),
+    "colon": (
+        "........",
+        "........",
+        "...##...",
+        "...##...",
+        "........",
+        "...##...",
+        "...##...",
+        "........",
+    ),
+    "slash": (
+        "........",
+        ".....##.",
+        "....##..",
+        "...##...",
+        "..##....",
+        ".##.....",
+        "##......",
+        "........",
+    ),
+    "play": (
+        "........",
+        "..#.....",
+        "..###...",
+        "..#####.",
+        "..#####.",
+        "..###...",
+        "..#.....",
+        "........",
+    ),
+    "pause": (
+        "........",
+        "..##.##.",
+        "..##.##.",
+        "..##.##.",
+        "..##.##.",
+        "..##.##.",
+        "..##.##.",
+        "........",
+    ),
+    "forward": (
+        "........",
+        ".#...#..",
+        ".###.###",
+        ".#######",
+        ".#######",
+        ".###.###",
+        ".#...#..",
+        "........",
+    ),
+    "rewind": (
+        "........",
+        "..#...#.",
+        "###.###.",
+        "#######.",
+        "#######.",
+        "###.###.",
+        "..#...#.",
+        "........",
+    ),
+    "bar_empty": (
+        "........",
+        "........",
+        "........",
+        "..CCCC..",
+        "..CCCC..",
+        "........",
+        "........",
+        "........",
+    ),
+    "bar_filled": (
+        "........",
+        "........",
+        "..****..",
+        ".******.",
+        ".******.",
+        "..****..",
+        "........",
+        "........",
+    ),
+}
+
+_BAR_TRACK: Final = "C"
+
+
+def _resolve(row: str) -> list[int]:
+    return [PANEL if code == _BAR_TRACK else _PIXEL_CODES[code] for code in row]
+
+
+GLYPH_ORDER: Final = (
+    "blank",
+    "panel",
+    *[str(digit) for digit in range(10)],
+    "colon",
+    "slash",
+    "play",
+    "pause",
+    "forward",
+    "rewind",
+    "bar_empty",
+    "bar_filled",
+)
+
+GLYPHS: Final[dict[str, int]] = {name: index for index, name in enumerate(GLYPH_ORDER)}
+
+
+def pack_tile(pixels: list[list[int]]) -> bytes:
+    """Pack one 8x8 nibble tile into its 32 S-ROM bytes."""
+    if len(pixels) != TILE_PX or any(len(row) != TILE_PX for row in pixels):
+        msg = f"fix tile must be 8x8, got {len(pixels)} rows"
+        raise ValueError(msg)
+    out = bytearray(TILE_BYTES)
+    for y in range(TILE_PX):
+        for pair, offset in enumerate(COLUMN_PAIR_OFFSETS):
+            left = pixels[y][pair * 2]
+            right = pixels[y][pair * 2 + 1]
+            for value in (left, right):
+                if not 0 <= value <= 0x0F:
+                    msg = "fix pixels must be 4-bit palette indices in the range 0 to 15"
+                    raise ValueError(msg)
+            out[offset + y] = (left & 0x0F) | ((right & 0x0F) << 4)
+    return bytes(out)
+
+
+def build_rom(*, pad_to: int | None = None) -> bytes:
+    """Pack every glyph into an S-ROM image."""
+    out = bytearray()
+    for name in GLYPH_ORDER:
+        out += pack_tile([_resolve(row) for row in _ART[name]])
+    if pad_to is not None:
+        if pad_to < len(out):
+            msg = f"pad_to {pad_to} is smaller than the {len(out)} byte glyph set"
+            raise ValueError(msg)
+        out = bytearray(bytes(out).ljust(pad_to, b"\x00"))
+    return bytes(out)
+
+
+def palette_words() -> list[int]:
+    """CRAM words for the overlay palette, transparent slot first."""
+    words = [0] * 16
+    words[INK] = pack_palette_word(*_INK_COLOR)
+    words[PANEL] = pack_palette_word(*_PANEL_COLOR)
+    words[ACCENT] = pack_palette_word(*_ACCENT_COLOR)
+    return words

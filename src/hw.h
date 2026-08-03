@@ -12,6 +12,10 @@
 #define REG_WATCHDOG (*(volatile uint8_t *)0x300001)
 #define REG_STATUS_B (*(volatile uint8_t *)0x380000)
 
+#define PROM_BANK_SELECT (*(volatile uint16_t *)0x2FFFF0)
+#define PROM_BANK_WINDOW 0x200000u
+#define PROM_BANK_BYTES  0x100000u
+
 #define REG_BRDFIX   (*(volatile uint8_t *)0x3A000B)
 #define REG_PALBANK1 (*(volatile uint8_t *)0x3A000F)
 #define REG_CRTFIX   (*(volatile uint8_t *)0x3A001B)

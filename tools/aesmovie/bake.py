@@ -21,11 +21,31 @@ from typing import Any, Final
 
 import numpy as np
 
-from aesmovie import crom, encode, frames, neocolor
+from aesmovie import crom, encode, fixtiles, frames, neocolor
 
 SECONDS_PER_MINUTE: Final = 60.0
 CROM_BANK_BYTES: Final = 128 << 20
 ADPCM_B_BYTES: Final = 16 << 20
+FIX_PALETTE_BANK: Final = 1
+S_ROM_BYTES: Final = 131072
+
+
+def _fix_defines() -> str:
+    names = {
+        "blank": "FIX_TILE_BLANK",
+        "panel": "FIX_TILE_PANEL",
+        "0": "FIX_TILE_DIGIT0",
+        "colon": "FIX_TILE_COLON",
+        "slash": "FIX_TILE_SLASH",
+        "play": "FIX_TILE_PLAY",
+        "pause": "FIX_TILE_PAUSE",
+        "forward": "FIX_TILE_FORWARD",
+        "rewind": "FIX_TILE_REWIND",
+        "bar_empty": "FIX_TILE_BAR_EMPTY",
+        "bar_filled": "FIX_TILE_BAR_FILLED",
+    }
+    return "\n".join(f"#define {macro} {fixtiles.GLYPHS[glyph]}" for glyph, macro in names.items())
+
 
 _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 #define MOVIE_DATA_H
@@ -38,11 +58,18 @@ _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 #define MOVIE_GRID_COLS {cols}
 #define MOVIE_GRID_ROWS {rows}
 #define MOVIE_MAX_UPDATES {max_updates}
+#define MOVIE_STREAM_BANKS {stream_banks}
+#define MOVIE_STREAM_BYTES {stream_bytes}u
+#define MOVIE_FPS_NUM {fps_num}u
+#define MOVIE_FPS_DEN {fps_den}u
 
-extern const unsigned char movie_stream[];
+#define FIX_PALETTE {fix_palette}
+{fix_defines}
+
 extern const unsigned char movie_index[];
 extern const unsigned char movie_keyframes[];
 extern const unsigned char movie_palettes[];
+extern const unsigned char movie_fix_palette[];
 
 #endif
 """
@@ -94,10 +121,12 @@ class BakeOutcome:
             "crom_payload_bytes": stats.crom_payload_bytes,
             "crom_rom_bytes": stats.crom_rom_bytes,
             "stream_bytes": stats.stream_bytes,
+            "stream_rom_bytes": stats.stream_rom_bytes,
             "keyframe_bytes": stats.keyframe_bytes,
             "delta_bytes": stats.delta_bytes,
             "index_bytes": stats.index_bytes,
             "keyframe_count": stats.keyframe_count,
+            "stream_banks": self.result.stream.bank_count(),
             "max_updates": stats.max_updates,
             "mean_updates": round(stats.mean_updates, 2),
             "mean_error": stats.mean_error,
@@ -116,10 +145,10 @@ def _write_sources(
     asm = generated / "movie_data.S"
     body = "    .section .rodata\n"
     for symbol, key in (
-        ("movie_stream", "stream"),
         ("movie_index", "index"),
         ("movie_keyframes", "keyframes"),
         ("movie_palettes", "palettes"),
+        ("movie_fix_palette", "fixpal"),
     ):
         body += _ASM_ENTRY.format(symbol=symbol, path=outcome_paths[key].as_posix())
     asm.write_text(body)
@@ -135,6 +164,12 @@ def _write_sources(
             cols=encode.GRID_COLS,
             rows=encode.GRID_ROWS,
             max_updates=result.stats.max_updates,
+            stream_banks=result.stream.bank_count(),
+            stream_bytes=result.stats.stream_bytes,
+            fps_num=frames.VBLANK_FPS.numerator,
+            fps_den=frames.VBLANK_FPS.denominator,
+            fix_palette=FIX_PALETTE_BANK,
+            fix_defines=_fix_defines(),
         )
     )
     return asm, header
@@ -205,7 +240,7 @@ def run(request: BakeRequest) -> BakeOutcome:
             allow_flip=request.allow_flip,
             sample_stride=request.sample_stride,
             seed=request.seed,
-            collect_rendered=True,
+            collect_rendered=request.preview is not None,
         ),
     )
 
@@ -219,6 +254,11 @@ def run(request: BakeRequest) -> BakeOutcome:
         "index": (baked / "index.bin", result.stream.index_blob()),
         "keyframes": (baked / "keyframes.bin", result.stream.keyframe_blob()),
         "palettes": (baked / "palettes.bin", result.palette_set.cram_blob()),
+        "fix": (baked / "fix.s1", fixtiles.build_rom(pad_to=S_ROM_BYTES)),
+        "fixpal": (
+            baked / "fixpal.bin",
+            b"".join(word.to_bytes(2, "big") for word in fixtiles.palette_words()),
+        ),
     }
     artifacts: dict[str, Path] = {}
     for key, (path, blob) in payload.items():

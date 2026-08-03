@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from aesmovie import bake, neocolor
+from aesmovie import bake, neocolor, stream
 
 
 @pytest.fixture(scope="module")
@@ -68,7 +68,7 @@ class TestArtifacts:
     def test_it_writes_the_command_stream(self, baked):
         path = baked.build_dir / "baked" / "stream.bin"
 
-        assert path.stat().st_size == baked.result.stats.stream_bytes
+        assert path.stat().st_size == baked.result.stats.stream_rom_bytes
 
     def test_it_writes_one_index_entry_per_frame(self, baked):
         path = baked.build_dir / "baked" / "index.bin"
@@ -88,17 +88,32 @@ class TestArtifacts:
 
 
 class TestGeneratedSources:
-    def test_it_emits_an_assembly_stub_linking_every_blob(self, baked):
+    def test_it_emits_an_assembly_stub_linking_the_small_blobs(self, baked):
         text = (baked.build_dir / "generated" / "movie_data.S").read_text()
 
-        for name in ("stream.bin", "index.bin", "keyframes.bin", "palettes.bin"):
+        for name in ("index.bin", "keyframes.bin", "palettes.bin"):
             assert name in text
+
+    def test_the_stream_is_not_linked_into_the_image(self, baked):
+        text = (baked.build_dir / "generated" / "movie_data.S").read_text()
+
+        assert "stream.bin" not in text
 
     def test_the_assembly_stub_exports_the_player_symbols(self, baked):
         text = (baked.build_dir / "generated" / "movie_data.S").read_text()
 
-        for symbol in ("movie_stream", "movie_index", "movie_keyframes", "movie_palettes"):
+        for symbol in ("movie_index", "movie_keyframes", "movie_palettes"):
             assert f".globl {symbol}" in text
+
+    def test_the_header_reports_the_stream_bank_count(self, baked):
+        text = (baked.build_dir / "generated" / "movie_data.h").read_text()
+
+        assert "#define MOVIE_STREAM_BANKS 1" in text
+
+    def test_the_stream_blob_is_a_whole_number_of_banks(self, baked):
+        size = (baked.build_dir / "baked" / "stream.bin").stat().st_size
+
+        assert size % stream.PROM_BANK_BYTES == 0
 
     def test_it_emits_a_header_with_the_frame_count(self, baked):
         text = (baked.build_dir / "generated" / "movie_data.h").read_text()
@@ -263,3 +278,36 @@ class TestPreviewGuards:
     def test_a_preview_without_rendered_frames_is_rejected(self, tmp_path):
         with pytest.raises(ValueError, match="no rendered frames"):
             bake._write_preview(tmp_path / "x.mkv", np.zeros((0, 224, 320), dtype=np.uint16))
+
+
+class TestRenderCollection:
+    def test_skipping_the_preview_skips_collecting_rendered_frames(self, synthetic_clip, tmp_path):
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=synthetic_clip,
+                start=0.0,
+                duration=0.2,
+                build_dir=tmp_path / "build",
+                palette_count=4,
+                candidates=0,
+                sample_stride=1,
+            )
+        )
+
+        assert outcome.result.rendered.shape[0] == 0
+
+    def test_requesting_a_preview_collects_rendered_frames(self, synthetic_clip, tmp_path):
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=synthetic_clip,
+                start=0.0,
+                duration=0.2,
+                build_dir=tmp_path / "build",
+                palette_count=4,
+                candidates=0,
+                sample_stride=1,
+                preview=tmp_path / "p.mkv",
+            )
+        )
+
+        assert outcome.result.rendered.shape[0] == outcome.result.stats.frames

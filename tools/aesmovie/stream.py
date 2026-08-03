@@ -34,6 +34,7 @@ SCB1_WORDS_PER_SPRITE: Final = 64
 FIRST_SPRITE: Final = 1
 MAX_TILE_NUMBER: Final = 1 << 20
 MAX_PALETTE: Final = 1 << 8
+PROM_BANK_BYTES: Final = 1 << 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,9 +102,17 @@ def pack_frame(updates: list[SlotUpdate]) -> bytes:
 
 
 class MovieStream:
-    """Accumulates frame records and the seek index that points at them."""
+    """Accumulates frame records and the seek index that points at them.
 
-    def __init__(self) -> None:
+    The stream lives in the 68000's switchable P-ROM window, so a frame
+    record must never straddle a bank boundary; the player would have to
+    change banks mid-record to finish reading it. Padding a record
+    forward to the next bank costs at most one record per megabyte and
+    keeps the player's inner loop free of any bank check.
+    """
+
+    def __init__(self, *, bank_size: int = PROM_BANK_BYTES) -> None:
+        self._bank_size = bank_size
         self._blob = bytearray()
         self._offsets: list[int] = []
         self._keyframes: list[int] = []
@@ -112,14 +121,31 @@ class MovieStream:
         return len(self._offsets)
 
     def append(self, updates: list[SlotUpdate], *, keyframe: bool = False) -> None:
-        """Add one frame record to the stream."""
+        """Add one frame record, keeping it inside a single bank."""
+        record = pack_frame(updates)
+        if len(record) > self._bank_size:
+            msg = f"frame record of {len(record)} bytes exceeds the {self._bank_size} byte bank"
+            raise ValueError(msg)
+        start = len(self._blob)
+        if start // self._bank_size != (start + len(record) - 1) // self._bank_size:
+            start = (start // self._bank_size + 1) * self._bank_size
+            self._blob += bytes(start - len(self._blob))
         if keyframe:
             self._keyframes.append(len(self._offsets))
-        self._offsets.append(len(self._blob))
-        self._blob += pack_frame(updates)
+        self._offsets.append(start)
+        self._blob += record
+
+    def payload_size(self) -> int:
+        """Bytes written so far, before padding out to whole banks."""
+        return len(self._blob)
+
+    def bank_count(self) -> int:
+        """Number of switchable banks the stream occupies, always at least one."""
+        return max(1, (len(self._blob) + self._bank_size - 1) // self._bank_size)
 
     def blob(self) -> bytes:
-        return bytes(self._blob)
+        """The stream padded out to whole banks."""
+        return bytes(self._blob).ljust(self.bank_count() * self._bank_size, b"\x00")
 
     def frame_offsets(self) -> npt.NDArray[np.uint32]:
         return np.array(self._offsets, dtype=np.uint32)

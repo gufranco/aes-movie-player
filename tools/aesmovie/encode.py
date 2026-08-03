@@ -57,6 +57,7 @@ class EncodeStats:
     crom_payload_bytes: int
     crom_rom_bytes: int
     stream_bytes: int
+    stream_rom_bytes: int
     keyframe_bytes: int
     delta_bytes: int
     index_bytes: int
@@ -114,7 +115,8 @@ def _build_stats(
         tile_count=tile_count,
         crom_payload_bytes=tile_count * crom.TILE_BYTES,
         crom_rom_bytes=2 * crom.rom_size_for(tile_count),
-        stream_bytes=len(movie.blob()),
+        stream_bytes=movie.payload_size(),
+        stream_rom_bytes=len(movie.blob()),
         keyframe_bytes=keyframe_bytes,
         delta_bytes=delta_bytes,
         index_bytes=len(movie.index_blob()),
@@ -244,9 +246,9 @@ def encode(clip: npt.NDArray[np.uint8], options: EncodeOptions) -> EncodeResult:
             refs = dictionary.intern_batch(assignment.nibbles)
             updates = screen.commit(rows, cols, refs, assignment, force=keyframe)
 
-        before = len(movie.blob())
+        before = movie.payload_size()
         movie.append(updates, keyframe=keyframe)
-        written = len(movie.blob()) - before
+        written = movie.payload_size() - before
         if keyframe:
             keyframe_bytes += written
         else:

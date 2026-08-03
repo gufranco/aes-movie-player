@@ -160,7 +160,8 @@ class TestMovieStream:
         movie.append([update(0, 0)])
         movie.append([])
 
-        assert movie.blob() == stream.pack_frame([update(0, 0)]) + b"\x00\x00"
+        first = stream.pack_frame([update(0, 0)])
+        assert movie.blob()[: len(first) + 2] == first + b"\x00\x00"
 
     def test_the_index_records_one_offset_per_frame(self):
         movie = stream.MovieStream()
@@ -204,4 +205,76 @@ class TestMovieStream:
         movie = stream.MovieStream()
 
         assert len(movie) == 0
-        assert movie.blob() == b""
+        assert not any(movie.blob())
+
+
+class TestBankContainment:
+    def test_records_never_straddle_a_bank_boundary(self):
+        movie = stream.MovieStream(bank_size=256)
+        big = [update(c, r) for c in range(4) for r in range(14)]
+
+        for _ in range(12):
+            movie.append(big)
+
+        size = len(stream.pack_frame(big))
+        for offset in movie.frame_offsets():
+            assert offset // 256 == (int(offset) + size - 1) // 256
+
+    def test_padding_advances_the_offset_to_the_next_bank(self):
+        movie = stream.MovieStream(bank_size=64)
+        movie.append([update(0, 0)])
+
+        movie.append([update(c, 0) for c in range(7)])
+
+        assert movie.frame_offsets()[1] == 64
+
+    def test_a_record_larger_than_a_bank_is_rejected(self):
+        movie = stream.MovieStream(bank_size=16)
+
+        with pytest.raises(ValueError, match="bank"):
+            movie.append([update(c, 0) for c in range(8)])
+
+    def test_the_blob_is_padded_out_to_whole_banks(self):
+        movie = stream.MovieStream(bank_size=64)
+        movie.append([update(0, 0)])
+
+        assert len(movie.blob()) == 64
+
+    def test_an_empty_stream_still_occupies_one_bank(self):
+        assert len(stream.MovieStream(bank_size=64).blob()) == 64
+
+    def test_the_bank_count_covers_every_record(self):
+        movie = stream.MovieStream(bank_size=64)
+        for _ in range(6):
+            movie.append([update(0, 0), update(1, 0)])
+
+        assert movie.bank_count() == 2
+
+    def test_an_empty_stream_still_reports_one_bank(self):
+        assert stream.MovieStream(bank_size=64).bank_count() == 1
+
+    def test_the_default_bank_size_is_the_switchable_window(self):
+        assert stream.PROM_BANK_BYTES == 1 << 20
+
+    def test_offsets_stay_reachable_through_the_bank_window(self):
+        movie = stream.MovieStream(bank_size=128)
+        for _ in range(10):
+            movie.append([update(0, 0), update(1, 0), update(2, 0)])
+
+        for offset in movie.frame_offsets():
+            assert int(offset) % 128 < 128
+
+
+class TestPayloadSize:
+    def test_payload_size_excludes_bank_padding(self):
+        movie = stream.MovieStream(bank_size=64)
+        movie.append([update(0, 0)])
+
+        assert movie.payload_size() == len(stream.pack_frame([update(0, 0)]))
+
+    def test_payload_size_counts_padding_inserted_between_records(self):
+        movie = stream.MovieStream(bank_size=64)
+        movie.append([update(0, 0)])
+        movie.append([update(c, 0) for c in range(7)])
+
+        assert movie.payload_size() == 64 + 2 + 7 * 8

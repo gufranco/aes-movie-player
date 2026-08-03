@@ -7,7 +7,6 @@ if [[ "$(uname)" != "Linux" ]]; then
         exit 1
     fi
     exec docker run --rm --platform linux/amd64 \
-        -e "P_ROM_BYTES=${P_ROM_BYTES:-524288}" \
         -v "$PWD:/work" -w /work ubuntu:24.04 bash -c '
         set -e
         export DEBIAN_FRONTEND=noninteractive
@@ -29,7 +28,7 @@ ROM="$BUILD/rom"
 BAKED="$BUILD/baked"
 GENERATED="$BUILD/generated"
 
-for required in "$BAKED/c1.bin" "$BAKED/c2.bin" "$GENERATED/movie_data.S" "$GENERATED/movie_data.h"; do
+for required in "$BAKED/c1.bin" "$BAKED/c2.bin" "$BAKED/fix.s1" "$GENERATED/movie_data.S" "$GENERATED/movie_data.h"; do
     if [[ ! -f "$required" ]]; then
         echo "missing bake artifact: $required" >&2
         exit 1
@@ -46,37 +45,46 @@ CFLAGS=(
     -Wall -Wextra -Werror
 )
 
-echo "CC src/main.c"
-m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c src/main.c -o "$BUILD/main.o"
+for unit in main menu; do
+    echo "CC src/$unit.c"
+    m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "src/$unit.c" -o "$BUILD/$unit.o"
+done
 
 echo "AS $GENERATED/movie_data.S"
 m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "$GENERATED/movie_data.S" -o "$BUILD/movie_data.o"
 
 echo "LD $BUILD/rom.elf"
-m68k-neogeo-elf-gcc -o "$BUILD/rom.elf" "$BUILD/main.o" "$BUILD/movie_data.o" \
+m68k-neogeo-elf-gcc -o "$BUILD/rom.elf" "$BUILD/main.o" "$BUILD/menu.o" "$BUILD/movie_data.o" \
     -Wl,-Map="$BUILD/rom.map" $(pkg-config --libs ngdevkit)
 
 echo "[ram] section sizes:"
 m68k-neogeo-elf-size "$BUILD/rom.elf" || true
 
-P_ROM_BYTES="${P_ROM_BYTES:-524288}"
+FIXED_ROM_BYTES=1048576
 m68k-neogeo-elf-objcopy -O binary -S -R .text2 --gap-fill 0xff \
     "$BUILD/rom.elf" "$ROM/p1.raw"
 RAW_SIZE=$(stat -c %s "$ROM/p1.raw")
-echo "[prom] payload $RAW_SIZE bytes of $P_ROM_BYTES"
-if [[ "$RAW_SIZE" -gt "$P_ROM_BYTES" ]]; then
-    echo "P-ROM overflow: $RAW_SIZE bytes exceeds the $P_ROM_BYTES byte window" >&2
+STREAM_SIZE=$(stat -c %s "$BAKED/stream.bin")
+STREAM_BANKS=$((STREAM_SIZE / FIXED_ROM_BYTES))
+echo "[prom] code and tables $RAW_SIZE bytes of $FIXED_ROM_BYTES fixed"
+echo "[prom] stream $STREAM_SIZE bytes in $STREAM_BANKS switchable bank(s)"
+if [[ "$RAW_SIZE" -gt "$FIXED_ROM_BYTES" ]]; then
+    echo "P-ROM overflow: $RAW_SIZE bytes exceeds the $FIXED_ROM_BYTES byte fixed region" >&2
+    exit 1
+fi
+if [[ $((STREAM_SIZE % FIXED_ROM_BYTES)) -ne 0 ]]; then
+    echo "stream is not a whole number of banks: $STREAM_SIZE bytes" >&2
     exit 1
 fi
 cp "$ROM/p1.raw" "$ROM/p1.p1"
-truncate -s "$P_ROM_BYTES" "$ROM/p1.p1"
+truncate -s "$FIXED_ROM_BYTES" "$ROM/p1.p1"
+cat "$BAKED/stream.bin" >> "$ROM/p1.p1"
 dd if="$ROM/p1.p1" of="$ROM/p1.p1" conv=notrunc,swab status=none
 
 cp /usr/share/ngdevkit/nullsound_driver.ihx "$ROM/m1.ihx"
 z80-neogeo-ihx-sdobjcopy -I ihex -O binary "$ROM/m1.ihx" "$ROM/m1.m1" --pad-to 131072
 
-: > "$ROM/s1.s1"
-truncate -s 131072 "$ROM/s1.s1"
+cp "$BAKED/fix.s1" "$ROM/s1.s1"
 : > "$ROM/v11.v1"
 truncate -s 524288 "$ROM/v11.v1"
 
