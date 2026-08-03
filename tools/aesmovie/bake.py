@@ -128,6 +128,8 @@ _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 #define MOVIE_TILE_COUNT {tiles}
 #define MOVIE_PALETTE_COUNT {palettes}
 #define MOVIE_PALETTE_BASE {base_bank}
+#define MOVIE_EPOCH_COUNT {epochs}
+#define MOVIE_EPOCH_PALETTES {epoch_palettes}
 #define MOVIE_KEYFRAME_COUNT {keyframes}
 #define MOVIE_GRID_COLS {cols}
 #define MOVIE_GRID_ROWS {rows}
@@ -145,6 +147,7 @@ _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 extern const unsigned char movie_index[];
 extern const unsigned char movie_keyframes[];
 extern const unsigned char movie_palettes[];
+extern const unsigned char movie_epochs[];
 extern const unsigned char movie_fix_palette[];
 
 #endif
@@ -283,6 +286,7 @@ def _write_sources(
         ("movie_index", "index"),
         ("movie_keyframes", "keyframes"),
         ("movie_palettes", "palettes"),
+        ("movie_epochs", "epochs"),
         ("movie_fix_palette", "fixpal"),
     ):
         body += _ASM_ENTRY.format(symbol=symbol, path=outcome_paths[key].name)
@@ -294,6 +298,8 @@ def _write_sources(
             frames=result.stats.frames,
             tiles=result.stats.tile_count,
             palettes=len(result.palette_set),
+            epochs=len(result.palette_sets),
+            epoch_palettes=len(result.palette_sets[0]),
             base_bank=result.palette_set.base_bank,
             keyframes=result.stats.keyframe_count,
             cols=encode.GRID_COLS,
@@ -427,6 +433,21 @@ def _write_preview(path: Path, rendered: np.ndarray) -> None:
         raise RuntimeError(msg)
 
 
+def _palette_blob(result: encode.EncodeResult) -> bytes:
+    """Every epoch's CRAM words, back to back in playing order."""
+    return b"".join(palette_set.cram_blob() for palette_set in result.palette_sets)
+
+
+def _epoch_blob(result: encode.EncodeResult) -> bytes:
+    """The frame each epoch begins on.
+
+    The half it lives in is not stored, because it alternates: an epoch
+    occupies the half its index parity names, which is what lets the
+    next set be written while the current one is still being read.
+    """
+    return np.asarray(result.epoch_starts, dtype=">u4").tobytes()
+
+
 def run(request: BakeRequest) -> BakeOutcome:
     """Decode, encode, and write every cart artifact."""
     sample_clip = frames.sample(
@@ -488,7 +509,8 @@ def run(request: BakeRequest) -> BakeOutcome:
         "stream": (baked / "stream.bin", result.stream.blob()),
         "index": (baked / "index.bin", result.stream.index_blob()),
         "keyframes": (baked / "keyframes.bin", result.stream.keyframe_blob()),
-        "palettes": (baked / "palettes.bin", result.palette_set.cram_blob()),
+        "palettes": (baked / "palettes.bin", _palette_blob(result)),
+        "epochs": (baked / "epochs.bin", _epoch_blob(result)),
         "fix": (baked / "fix.s1", fixtiles.build_rom(pad_to=S_ROM_BYTES)),
         "fixpal": (
             baked / "fixpal.bin",

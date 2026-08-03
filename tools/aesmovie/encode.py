@@ -86,6 +86,7 @@ class EncodeResult:
     dictionary: TileDictionary
     palette_set: palettes.PaletteSet
     palette_sets: list[palettes.PaletteSet]
+    epoch_starts: list[int]
     updates_per_frame: npt.NDArray[np.int32]
     rendered: npt.NDArray[np.uint16]
     stats: EncodeStats
@@ -649,6 +650,7 @@ def encode_stream(
         dictionary=dictionary,
         palette_set=palette_sets[0],
         palette_sets=palette_sets,
+        epoch_starts=epoch_starts,
         updates_per_frame=updates_per_frame,
         rendered=rendered,
         stats=stats,

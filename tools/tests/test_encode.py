@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import itertools
+
 import numpy as np
 import pytest
 
@@ -703,3 +705,50 @@ class TestPaletteEpochs:
 
         assert result.stats.tile_count > 0
         assert not result.stats.dictionary_full
+
+
+class TestEpochSchedule:
+    """What the player needs in order to have colours ready in time."""
+
+    def clip(self, count: int) -> np.ndarray:
+        rng = np.random.default_rng(3)
+        return rng.integers(0, 256, size=(count, HEIGHT, WIDTH, 3), dtype=np.uint8)
+
+    def result(self, frames_per_epoch: int, count: int):
+        clip = self.clip(count)
+        tiles = encode.to_tiles(neocolor.rgb_to_color_index(clip))
+        epochs = [
+            (start, tiles[start : start + frames_per_epoch].reshape(-1, 16, 16))
+            for start in range(0, count, frames_per_epoch)
+        ]
+        return encode.encode_stream(
+            [clip],
+            options_for(palette_count=8),
+            sample_tiles=epochs[0][1],
+            epoch_samples=epochs,
+            total_frames=count,
+        )
+
+    def test_it_reports_where_each_epoch_starts(self):
+        result = self.result(3, 12)
+
+        assert list(result.epoch_starts) == [0, 3, 6, 9]
+
+    def test_consecutive_epochs_never_share_a_half(self):
+        result = self.result(3, 12)
+
+        banks = [palette_set.base_bank for palette_set in result.palette_sets]
+        for earlier, later in itertools.pairwise(banks):
+            assert earlier != later
+
+    def test_epochs_two_apart_reuse_the_same_half(self):
+        result = self.result(3, 12)
+
+        banks = [palette_set.base_bank for palette_set in result.palette_sets]
+        assert banks[0] == banks[2]
+
+    def test_a_single_epoch_keeps_the_whole_allocation(self):
+        result = encode.encode(self.clip(4), options_for(palette_count=8))
+
+        assert len(result.palette_sets) == 1
+        assert len(result.palette_sets[0]) == 8

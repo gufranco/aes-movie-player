@@ -82,19 +82,115 @@ static void clear_vram(void)
     vram_fill(VRAM_SCB2, VRAM_UPPER_WORDS, 0);
 }
 
-static void upload_palettes(void)
+/* Colours are refitted per scene, so CRAM holds two epochs at once: the
+ * one on screen and the one coming next. They occupy alternating halves
+ * of the video allocation, which is what lets the next set be written
+ * while the current one is still being read. A whole set is far too much
+ * to write in one vblank, so the upload is paid a slice at a time across
+ * the epoch that precedes it. */
+/* One epoch's own palette count, which is the whole allocation when the
+ * movie has a single epoch and half of it when epochs alternate. It is
+ * emitted rather than derived so the two cases cannot drift apart. */
+#define EPOCH_WORDS      (MOVIE_EPOCH_PALETTES * 16u)
+#define EPOCH_SLICE      48u
+
+static uint16_t resident_epoch;
+static uint16_t loading_epoch;
+static uint16_t loading_word;
+
+static volatile uint16_t *epoch_cram(uint16_t epoch)
 {
-    const uint16_t *source = (const uint16_t *)movie_palettes;
+    return PALRAM + (MOVIE_PALETTE_BASE * 16u) + (epoch & 1u) * EPOCH_WORDS;
+}
+
+static const uint16_t *epoch_source(uint16_t epoch)
+{
+    return (const uint16_t *)movie_palettes + (uint32_t)epoch * EPOCH_WORDS;
+}
+
+static uint32_t epoch_start(uint16_t epoch)
+{
+    return ((const uint32_t *)movie_epochs)[epoch];
+}
+
+static void clear_reserved_palettes(void)
+{
     volatile uint16_t *target = PALRAM;
     uint16_t reserved = MOVIE_PALETTE_BASE * 16;
-    uint16_t words = MOVIE_PALETTE_COUNT * 16;
 
     while (reserved--) {
         *target++ = 0;
     }
+}
+
+static void upload_epoch(uint16_t epoch)
+{
+    const uint16_t *source = epoch_source(epoch);
+    volatile uint16_t *target = epoch_cram(epoch);
+    uint16_t words = EPOCH_WORDS;
+
     while (words--) {
         *target++ = *source++;
     }
+}
+
+/* One slice of the epoch after the one on screen. Splitting it this way
+ * keeps every frame's share small enough to disappear inside vblank. */
+static void upload_palette_slice(void)
+{
+    const uint16_t *source;
+    volatile uint16_t *target;
+    uint16_t words = EPOCH_SLICE;
+
+    if (loading_epoch >= MOVIE_EPOCH_COUNT || loading_word >= EPOCH_WORDS) {
+        return;
+    }
+    source = epoch_source(loading_epoch) + loading_word;
+    target = epoch_cram(loading_epoch) + loading_word;
+    if (loading_word + words > EPOCH_WORDS) {
+        words = (uint16_t)(EPOCH_WORDS - loading_word);
+    }
+    loading_word = (uint16_t)(loading_word + words);
+    while (words--) {
+        *target++ = *source++;
+    }
+}
+
+static void begin_loading(uint16_t epoch)
+{
+    loading_epoch = epoch;
+    loading_word = 0;
+}
+
+/* Make the colours for a frame resident at once, for boot and for seeks
+ * where there is no preceding epoch to spread the cost over. */
+static void palettes_for_frame(uint32_t frame)
+{
+    uint16_t epoch = 0;
+
+    while (epoch + 1u < MOVIE_EPOCH_COUNT && epoch_start((uint16_t)(epoch + 1u)) <= frame) {
+        epoch++;
+    }
+    upload_epoch(epoch);
+    resident_epoch = epoch;
+    begin_loading((uint16_t)(epoch + 1u));
+}
+
+static void follow_epoch(uint32_t frame)
+{
+    uint16_t next = (uint16_t)(resident_epoch + 1u);
+
+    if (next < MOVIE_EPOCH_COUNT && frame >= epoch_start(next)) {
+        resident_epoch = next;
+        begin_loading((uint16_t)(next + 1u));
+    }
+    upload_palette_slice();
+}
+
+static void upload_palettes(void)
+{
+    clear_reserved_palettes();
+    palettes_for_frame(0);
 }
 
 static void setup_sprite_grid(void)
@@ -171,6 +267,7 @@ static uint32_t seek_to(uint32_t target)
         target = MOVIE_FRAME_COUNT - 1;
     }
     landing = keyframe_at_or_before(target);
+    palettes_for_frame(landing);
     apply_frame(landing);
     return landing;
 }
@@ -266,6 +363,7 @@ int main(void)
 
         wait_vblank();
         watchdog_kick();
+        follow_epoch(frame);
 
         switch (state) {
         case TRANSPORT_PAUSE:
@@ -278,6 +376,7 @@ int main(void)
                     audio_seek(frame);
                 } else {
                     frame = keyframe_at_or_before(frame - 1);
+                    palettes_for_frame(frame);
                     apply_frame(frame);
                 }
             }
@@ -290,6 +389,7 @@ int main(void)
                 apply_frame(frame);
                 if (++frame >= MOVIE_FRAME_COUNT) {
                     frame = 0;
+                    palettes_for_frame(0);
                     if (state == TRANSPORT_PLAY) {
                         audio_seek(0);
                     }
