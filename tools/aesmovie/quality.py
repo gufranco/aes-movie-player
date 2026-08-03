@@ -17,6 +17,15 @@ voice ROM holds the soundtrack and only constrains anything past about
 The relative costs below were measured on dense animation. They set the
 shape of the ladder, never its absolute position, which calibration
 supplies per source.
+
+There is no lossless rung and there cannot be one. A tile draws from a
+single bank of 15 colours, and 83% of tiles in real footage hold more
+distinct colours than that once the picture is reduced to the hardware's
+15-bit palette, so the quantisation step always discards something. The
+top rung instead guarantees that nothing the encoder controls is given
+up: every frame is shown, no drift is tolerated, colour is charged at
+the same rate as luminance, nothing is denoised, and every palette is
+searched rather than a shortlist.
 """
 
 from __future__ import annotations
@@ -53,9 +62,20 @@ class Tier:
     denoise: float
     relative_cost: float
     summary: str
+    candidates: int = 12
 
 
 LADDER: Final = (
+    Tier(
+        "reference",
+        1.0,
+        1,
+        0.0,
+        0.0,
+        2.571,
+        "every frame, nothing given up that the encoder controls",
+        candidates=0,
+    ),
     Tier("archival", 1.0, 1, 0.0005, 0.0, 1.678, "every frame, full colour precision"),
     Tier("high", 0.5, 1, 0.0005, 0.0, 1.515, "every frame, slightly cheaper colour"),
     Tier("standard", 0.35, 1, 0.001, 0.0, 1.000, "every frame, cheaper colour"),

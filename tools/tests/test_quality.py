@@ -53,7 +53,7 @@ class TestSelection:
         fit = quality.select(1.0, 100_000.0)
 
         assert fit is not None
-        assert fit.tier.name == "archival"
+        assert fit.tier is quality.LADDER[0]
 
     def test_a_long_source_falls_down_the_ladder(self):
         short = quality.select(2.0, 100_000.0)
@@ -220,3 +220,43 @@ class TestAudioFitsThePageCounter:
 
     def test_a_short_movie_is_unaffected(self):
         assert quality.audio_hz_for(5.0) == quality.DEFAULT_AUDIO_HZ
+
+
+class TestReferenceTier:
+    """The top rung concedes nothing the encoder controls.
+
+    True lossless is not reachable on this hardware: a tile may use 15
+    colours and 83% of real tiles hold more than that, so the palette
+    step always loses something. What this tier guarantees is that every
+    avoidable compromise is switched off.
+    """
+
+    def tier(self):
+        return quality.tier_by_name("reference")
+
+    def test_it_is_the_most_expensive_rung(self):
+        assert self.tier().relative_cost == max(t.relative_cost for t in quality.LADDER)
+
+    def test_it_is_first_on_the_ladder(self):
+        assert quality.LADDER[0].name == "reference"
+
+    def test_it_charges_colour_at_full_rate(self):
+        assert self.tier().chroma_weight == 1.0
+
+    def test_it_shows_every_frame(self):
+        assert self.tier().frame_hold == 1
+
+    def test_it_never_tolerates_drift(self):
+        assert self.tier().tolerance == 0.0
+
+    def test_it_does_not_denoise(self):
+        assert self.tier().denoise == 0.0
+
+    def test_it_searches_every_palette(self):
+        assert self.tier().candidates == 0
+
+    def test_a_short_source_selects_it(self):
+        fit = quality.select(0.5, 100_000.0)
+
+        assert fit is not None
+        assert fit.tier.name == "reference"

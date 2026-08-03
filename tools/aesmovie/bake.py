@@ -544,7 +544,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--keyframe-interval", type=int, default=90)
     parser.add_argument("--tolerance", type=float, default=None)
     parser.add_argument("--scene-cut-ratio", type=float, default=0.90)
-    parser.add_argument("--candidates", type=int, default=12)
+    parser.add_argument("--candidates", type=int, default=None)
     parser.add_argument("--flip", action="store_true")
     parser.add_argument("--sample-stride", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
@@ -657,7 +657,7 @@ def main(argv: list[str] | None = None) -> int:
             keyframe_interval=args.keyframe_interval,
             tolerance=_pick(args.tolerance, tier.tolerance if tier else None, 0.0005),
             scene_cut_ratio=args.scene_cut_ratio,
-            candidates=args.candidates,
+            candidates=_pick(args.candidates, tier.candidates if tier else None, 12),
             allow_flip=args.flip,
             sample_stride=args.sample_stride,
             seed=args.seed,
