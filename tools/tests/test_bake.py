@@ -604,10 +604,15 @@ class TestQualityResolution:
         assert bake._resolve_quality(self.args(synthetic_clip)) is None
 
     def test_a_named_tier_is_returned(self, synthetic_clip):
-        tier = bake._resolve_quality(self.args(synthetic_clip, quality="long"))
+        tier = bake._resolve_quality(self.args(synthetic_clip, quality="q14"))
 
         assert tier is not None
-        assert tier.name == "long"
+        assert tier.name == "q14"
+
+    def test_an_older_tier_name_still_resolves(self, synthetic_clip):
+        tier = bake._resolve_quality(self.args(synthetic_clip, quality="long"))
+
+        assert tier is quality.tier_by_name("long")
 
     def test_an_unknown_tier_is_rejected(self, synthetic_clip):
         with pytest.raises(ValueError, match="unknown quality tier"):
@@ -680,3 +685,67 @@ class TestPaletteEpochFlag:
 
         table = (outcome.build_dir / "baked" / "epochs.bin").read_bytes()
         assert len(table) == 4 * len(outcome.result.palette_sets)
+
+
+class TestSceneAlignedEpochs:
+    def cut_clip(self, tmp_path):
+        """Two scenes with nothing in common, joined by a hard cut."""
+        path = tmp_path / "cut.mp4"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:size=320x224:rate=24:duration=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=blue:size=320x224:rate=24:duration=1",
+                "-filter_complex",
+                "[0:v][1:v]concat=n=2:v=1:a=0",
+                "-pix_fmt",
+                "yuv420p",
+                str(path),
+            ],
+            check=True,
+        )
+        return path
+
+    def test_an_epoch_begins_at_the_cut(self, tmp_path):
+        clip = self.cut_clip(tmp_path)
+
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=clip,
+                start=0.0,
+                duration=2.0,
+                build_dir=tmp_path / "aligned",
+                palette_count=8,
+                palette_epoch_seconds=4.0,
+            )
+        )
+
+        cut = round(1.0 * float(frames_mod.VBLANK_FPS))
+        starts = outcome.result.epoch_starts
+
+        # Cuts are found in the strided palette sample, so a boundary
+        # lands within one stride of the true cut rather than on it.
+        assert any(abs(start - cut) <= outcome.request.sample_stride for start in starts)
+
+    def test_a_cadence_still_subdivides_a_long_scene(self, synthetic_clip, tmp_path):
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=synthetic_clip,
+                start=0.0,
+                duration=1.0,
+                build_dir=tmp_path / "subdivided",
+                palette_count=8,
+                palette_epoch_seconds=0.25,
+            )
+        )
+
+        assert len(outcome.result.epoch_starts) > 1

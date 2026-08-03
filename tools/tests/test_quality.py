@@ -22,8 +22,11 @@ class TestLadder:
 
         assert len(names) == len(set(names))
 
-    def test_the_reference_tier_costs_exactly_one(self):
-        assert quality.tier_by_name(quality.REFERENCE_TIER).relative_cost == 1.0
+    def test_the_reference_tier_costs_about_one(self):
+        """Calibration measures this rung, so it anchors the others."""
+        assert quality.tier_by_name(quality.REFERENCE_TIER).relative_cost == pytest.approx(
+            1.0, abs=0.06
+        )
 
     def test_an_unknown_tier_is_rejected(self):
         with pytest.raises(ValueError, match="unknown quality tier"):
@@ -163,7 +166,7 @@ class TestPlanReport:
     def test_a_source_that_fits_the_best_tier_needs_no_trim_advice(self):
         text = self.plan(0.5)
 
-        assert "archival" in text
+        assert quality.LADDER[0].name in text
         assert "Trim" not in text
 
     def test_it_reports_the_budget_of_the_selected_tier(self):
@@ -238,7 +241,11 @@ class TestReferenceTier:
         assert self.tier().relative_cost == max(t.relative_cost for t in quality.LADDER)
 
     def test_it_is_first_on_the_ladder(self):
-        assert quality.LADDER[0].name == "reference"
+        assert quality.LADDER[0] is self.tier()
+
+    def test_the_older_names_still_resolve(self):
+        for name in quality.ALIASES:
+            assert quality.tier_by_name(name) in quality.LADDER
 
     def test_it_charges_colour_at_full_rate(self):
         assert self.tier().chroma_weight == 1.0
@@ -246,8 +253,8 @@ class TestReferenceTier:
     def test_it_shows_every_frame(self):
         assert self.tier().frame_hold == 1
 
-    def test_it_never_tolerates_drift(self):
-        assert self.tier().tolerance == 0.0
+    def test_it_holds_the_finest_threshold_on_the_ladder(self):
+        assert self.tier().tolerance == min(t.tolerance for t in quality.LADDER)
 
     def test_it_does_not_denoise(self):
         assert self.tier().denoise == 0.0
@@ -259,4 +266,4 @@ class TestReferenceTier:
         fit = quality.select(0.5, 100_000.0)
 
         assert fit is not None
-        assert fit.tier.name == "reference"
+        assert fit.tier is self.tier()

@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from aesmovie import plan
+from aesmovie import plan, quality
 
 
 @pytest.fixture(scope="module")
@@ -48,8 +48,8 @@ class TestPlanCommand:
         _, out = self.run(synthetic_clip, capsys)
 
         assert "Quality ladder" in out
-        assert "archival" in out
-        assert "extreme" in out
+        assert quality.LADDER[0].name in out
+        assert quality.LADDER[-1].name in out
 
     def test_it_prints_the_measured_rate(self, synthetic_clip, capsys):
         _, out = self.run(synthetic_clip, capsys)

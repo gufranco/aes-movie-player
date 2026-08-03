@@ -163,10 +163,24 @@ class _RateController:
     hundreds of frames to reach, so it arrives after the dictionary has
     already hit its cap. This instead compares the recent rate of tile
     creation against the rate the remaining budget affords, and holds a
-    multiplier that ratchets up while spending is too fast and decays
-    while it is not. Because the multiplier persists between frames it
-    keeps climbing until it actually bites, which is the property a
-    per-frame calculation cannot have.
+    multiplier that persists between frames so it keeps moving until it
+    actually bites.
+
+    The multiplier never falls below one, so the tier's threshold is a
+    floor and the controller only ever tightens. Letting it relax was
+    tried, in the hope of spending the capacity a discrete tier leaves
+    behind, and it loses in both the forms attempted. Tile spending is
+    heavily front-loaded, since an empty dictionary mints a tile for
+    almost every slot and a full one reuses: over one clip the four
+    quarters spent 7,030, 16,229, 11,572 and 22,704 updates against a
+    flat expectation of 14,247. A controller pacing against a uniform
+    budget therefore relaxes exactly when spending is naturally light
+    and starves the passages that legitimately need the tiles. Filling
+    the cartridge to 100% that way scored 26.63 where never relaxing
+    scored 20.11.
+
+    Spending the leftover capacity needs a budget curve shaped like the
+    content rather than a straight line, which is a two-pass problem.
 
     The multiplier never falls below one, so the tier's own threshold is
     a floor and the controller can only tighten.

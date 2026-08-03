@@ -18,6 +18,20 @@ The relative costs below were measured on dense animation. They set the
 shape of the ladder, never its absolute position, which calibration
 supplies per source.
 
+The rungs follow the measured Pareto frontier, which turned out to hold
+a surprise: frame rate is a far worse thing to spend than colour. At a
+fixed cost, keeping every frame and thinning the palette beat dropping
+to a third of the frame rate by nearly half the error, and did it for
+fewer tiles. Every rung down to 0.645 therefore keeps all 59.2 frames a
+second, and holding frames only begins once colour has been spent all
+the way down. An earlier ladder started dropping frames at 0.686, above
+the point where the data says not to, which is why its middle rungs felt
+like a cliff rather than a step.
+
+Steps are around 9%. Finer would be false precision: the costs come from
+one clip, so a 5% difference between neighbours sits inside the noise of
+the measurement that produced them.
+
 There is no lossless rung and there cannot be one. A tile draws from a
 single bank of 15 colours, and 83% of tiles in real footage hold more
 distinct colours than that once the picture is reduced to the hardware's
@@ -66,30 +80,48 @@ class Tier:
 
 
 LADDER: Final = (
-    Tier(
-        "reference",
-        1.0,
-        1,
-        0.0,
-        0.0,
-        2.571,
-        "every frame, nothing given up that the encoder controls",
-        candidates=0,
-    ),
-    Tier("archival", 1.0, 1, 0.0005, 0.0, 1.678, "every frame, full colour precision"),
-    Tier("high", 0.5, 1, 0.0005, 0.0, 1.515, "every frame, slightly cheaper colour"),
-    Tier("standard", 0.35, 1, 0.001, 0.0, 1.000, "every frame, cheaper colour"),
-    Tier("extended", 0.35, 3, 0.002, 0.0, 0.686, "20 fps, cheaper colour"),
-    Tier("long", 0.25, 4, 0.004, 1.0, 0.466, "15 fps, mild denoise"),
-    Tier("maximum", 0.15, 5, 0.008, 2.0, 0.335, "12 fps, visible softening"),
-    Tier("extreme", 0.10, 6, 0.015, 3.0, 0.238, "10 fps, heavy softening"),
+    Tier("q01", 1.0, 1, 0.0005, 0.0, 2.283, "every frame, colour at 100%", candidates=0),
+    Tier("q02", 0.89, 1, 0.0006, 0.0, 2.071, "every frame, colour at 89%"),
+    Tier("q03", 0.79, 1, 0.0007, 0.0, 1.88, "every frame, colour at 79%"),
+    Tier("q04", 0.7, 1, 0.0008, 0.0, 1.705, "every frame, colour at 70%"),
+    Tier("q05", 0.62, 1, 0.0009, 0.0, 1.547, "every frame, colour at 62%"),
+    Tier("q06", 0.54, 1, 0.001, 0.0, 1.404, "every frame, colour at 54%"),
+    Tier("q07", 0.48, 1, 0.0011, 0.0, 1.274, "every frame, colour at 48%"),
+    Tier("q08", 0.42, 1, 0.0015, 0.0, 1.156, "every frame, colour at 42%"),
+    Tier("q09", 0.37, 1, 0.0018, 0.0, 1.049, "every frame, colour at 37%"),
+    Tier("q10", 0.31, 1, 0.0024, 0.0, 0.952, "every frame, colour at 31%"),
+    Tier("q11", 0.24, 1, 0.0032, 0.0, 0.863, "every frame, colour at 24%"),
+    Tier("q12", 0.2, 1, 0.0044, 0.0, 0.783, "every frame, colour at 20%"),
+    Tier("q13", 0.16, 1, 0.0061, 0.0, 0.711, "every frame, colour at 16%"),
+    Tier("q14", 0.12, 1, 0.008, 0.0, 0.645, "every frame, colour at 12%"),
+    Tier("q15", 0.12, 3, 0.008, 0.0, 0.602, "20 fps, colour at 12%"),
+    Tier("q16", 0.12, 4, 0.008, 0.0, 0.549, "15 fps, colour at 12%"),
+    Tier("q17", 0.12, 5, 0.008, 0.0, 0.507, "12 fps, colour at 12%"),
+    Tier("q18", 0.12, 6, 0.008, 0.0, 0.47, "10 fps, colour at 12%"),
 )
 
-REFERENCE_TIER: Final = "standard"
+REFERENCE_TIER: Final = "q09"
+
+
+ALIASES: Final = {
+    "reference": "q01",
+    "archival": "q02",
+    "high": "q06",
+    "standard": "q09",
+    "extended": "q12",
+    "long": "q14",
+    "maximum": "q16",
+    "extreme": "q18",
+}
 
 
 def tier_by_name(name: str) -> Tier:
-    """Look a tier up by name, listing the ladder when it is not one."""
+    """Look a tier up by name, listing the ladder when it is not one.
+
+    The older seven names still resolve, to the rung nearest what they
+    used to mean, so existing commands keep working.
+    """
+    name = ALIASES.get(name, name)
     for tier in LADDER:
         if tier.name == name:
             return tier

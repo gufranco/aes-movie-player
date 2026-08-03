@@ -28,6 +28,10 @@ _ANALYSIS_SECONDS: Final = 8.0
 _CROP: Final = re.compile(r"crop=(\d+):(\d+):(\d+):(\d+)")
 
 VBLANK_FPS: Final = Fraction(6_000_000, 384 * 264)
+DISPLAY_ASPECT: Final = 4 / 3
+PIXEL_ASPECT: Final = DISPLAY_ASPECT * 224 / 320
+_ROW_EPSILON: Final = 1e-6
+
 TARGET_WIDTH: Final = 320
 TARGET_HEIGHT: Final = 224
 TILE_PX: Final = 16
@@ -236,7 +240,14 @@ def plan_geometry(
     *,
     fit: FitMode = "fill",
 ) -> Geometry:
-    """Work out the crop, scale, and pad that map a source onto the raster."""
+    """Work out the crop, scale, and pad that map a source onto the raster.
+
+    The raster is not square. An AES drives a 4:3 television with 320 by
+    224 pixels, so a pixel is 0.9333 as wide as it is tall, and a crop
+    aimed at the raster's own ratio arrives on screen squashed by that
+    much. Aspect decisions are therefore made in display space and only
+    converted to pixels at the end.
+    """
     if fit not in _FIT_MODES:
         msg = f"unknown fit mode {fit!r}, expected one of {_FIT_MODES}"
         raise ValueError(msg)
@@ -245,7 +256,7 @@ def plan_geometry(
     source_aspect = source_width / source_height
 
     if fit == "fill":
-        target_aspect = target_width / target_height
+        target_aspect = (target_width / target_height) * PIXEL_ASPECT
         if source_aspect > target_aspect:
             crop = (_even(round(source_height * target_aspect)), _even(source_height))
         else:
@@ -254,12 +265,15 @@ def plan_geometry(
 
     crop = (_even(source_width), _even(source_height))
     rows_total = target_height // TILE_PX
-    ideal_rows = (target_width / source_aspect) / TILE_PX
+    ideal_rows = (target_width * PIXEL_ASPECT / source_aspect) / TILE_PX
+    # A source that exactly fills the screen lands on a whole row count
+    # that binary floating point renders a hair under it, which would
+    # letterbox a 4:3 source for no reason. Compare with a tolerance.
     image_rows = max(
         (
             rows
             for rows in range(rows_total, 0, -1)
-            if rows <= ideal_rows and (rows_total - rows) % 2 == 0
+            if rows <= ideal_rows + _ROW_EPSILON and (rows_total - rows) % 2 == 0
         ),
         default=rows_total,
     )

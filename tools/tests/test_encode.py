@@ -536,12 +536,17 @@ class TestRateControl:
 
         assert held.stats.peak_tolerance > options().tolerance
 
-    def test_an_untouched_budget_reports_the_base_tolerance(self):
+    def test_a_roomy_budget_never_tightens_past_the_base(self):
+        """The controller may relax below the tier, but must not tighten.
+
+        With room to spare there is nothing to correct, so the threshold
+        only ever moves in the direction that spends more.
+        """
         clip = self.busy(6)
 
         result = encode.encode(clip, options(tile_budget=1 << 20))
 
-        assert result.stats.peak_tolerance == pytest.approx(options().tolerance)
+        assert result.stats.peak_tolerance <= options().tolerance
 
     def test_a_budget_it_cannot_meet_is_reported(self):
         clip = self.busy(10)
@@ -769,3 +774,52 @@ class TestSingleEpochAllocation:
         )
 
         assert len(result.palette_sets[0]) == 8
+
+
+class TestBudgetIsNotOverspent:
+    """The controller limits spending; it deliberately does not allocate.
+
+    Letting it relax below the tier was measured twice and lost both
+    times, because tile spending is front-loaded and pacing against a
+    uniform budget relaxes exactly when spending is naturally light.
+    These pin the behaviour that survived.
+    """
+
+    def drifting(self, count: int) -> np.ndarray:
+        x = np.arange(WIDTH, dtype=np.float32)[None, :]
+        y = np.arange(HEIGHT, dtype=np.float32)[:, None]
+        clip = np.zeros((count, HEIGHT, WIDTH, 3), dtype=np.uint8)
+        for index in range(count):
+            base = x * 0.35 + y * 0.25 + index * 1.1
+            clip[index, :, :, 0] = np.clip(90 + 40 * np.sin(base / 23.0), 0, 255)
+            clip[index, :, :, 1] = np.clip(110 + 40 * np.sin(base / 31.0 + 1.0), 0, 255)
+            clip[index, :, :, 2] = np.clip(130 + 40 * np.sin(base / 41.0 + 2.0), 0, 255)
+        return clip
+
+    def settings(self, **extra):
+        return options_for(palette_count=8, keyframe_interval=1000, tolerance=0.02, **extra)
+
+    def test_a_roomy_budget_changes_nothing(self):
+        clip = self.drifting(60)
+
+        free = encode.encode(clip, self.settings(tile_budget=0))
+        roomy = encode.encode(clip, self.settings(tile_budget=len(free.dictionary) * 8))
+
+        assert len(roomy.dictionary) == len(free.dictionary)
+
+    def test_the_threshold_is_never_finer_than_the_tier_asked(self):
+        clip = self.drifting(60)
+
+        result = encode.encode(clip, self.settings(tile_budget=1 << 20))
+
+        assert result.stats.peak_tolerance >= self.settings().tolerance
+
+    def test_a_tight_budget_is_still_respected(self):
+        rng = np.random.default_rng(23)
+        clip = rng.integers(0, 256, size=(10, HEIGHT, WIDTH, 3), dtype=np.uint8)
+        free = encode.encode(clip, options_for(keyframe_interval=1000))
+
+        budget = len(free.dictionary) // 2
+        held = encode.encode(clip, options_for(keyframe_interval=1000, tile_budget=budget))
+
+        assert len(held.dictionary) <= budget

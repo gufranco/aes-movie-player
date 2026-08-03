@@ -60,17 +60,19 @@ class TestFillGeometry:
     def test_a_wider_source_is_cropped_horizontally(self):
         geometry = frames.plan_geometry(1280, 720, 320, 224, fit="fill")
 
-        assert geometry.crop == (1028, 720)
+        assert geometry.crop == (960, 720)
 
     def test_a_taller_source_is_cropped_vertically(self):
         geometry = frames.plan_geometry(720, 1280, 320, 224, fit="fill")
 
-        assert geometry.crop == (720, 504)
+        # 4:3 on screen, not the raster's own 320:224
+        assert geometry.crop == (720, 540)
 
     def test_a_matching_aspect_is_not_cropped(self):
-        geometry = frames.plan_geometry(640, 448, 320, 224, fit="fill")
+        """A source already shaped like the screen, 4:3, survives whole."""
+        geometry = frames.plan_geometry(640, 480, 320, 224, fit="fill")
 
-        assert geometry.crop == (640, 448)
+        assert geometry.crop == (640, 480)
 
     def test_fill_uses_the_whole_target_frame(self):
         geometry = frames.plan_geometry(1280, 720, 320, 224, fit="fill")
@@ -105,7 +107,7 @@ class TestLetterboxGeometry:
         assert geometry.pad_top * 2 + geometry.image[1] == 224
 
     def test_a_matching_aspect_needs_no_bars(self):
-        geometry = frames.plan_geometry(640, 448, 320, 224, fit="letterbox")
+        geometry = frames.plan_geometry(640, 480, 320, 224, fit="letterbox")
 
         assert geometry.pad_top == 0
         assert geometry.image == (320, 224)
@@ -384,10 +386,21 @@ class TestSourceAnalysis:
         path = tmp_path / "interlaced.mp4"
         subprocess.run(
             [
-                "ffmpeg", "-v", "error", "-y", "-f", "lavfi",
-                "-i", "testsrc=size=640x480:rate=25:duration=2",
-                "-vf", "interlace", "-flags", "+ilme+ildct",
-                "-pix_fmt", "yuv420p", str(path),
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=640x480:rate=25:duration=2",
+                "-vf",
+                "interlace",
+                "-flags",
+                "+ilme+ildct",
+                "-pix_fmt",
+                "yuv420p",
+                str(path),
             ],
             check=True,
         )
@@ -397,10 +410,19 @@ class TestSourceAnalysis:
         path = tmp_path / "bars.mp4"
         subprocess.run(
             [
-                "ffmpeg", "-v", "error", "-y", "-f", "lavfi",
-                "-i", "testsrc=size=640x360:rate=25:duration=2",
-                "-vf", "pad=640:480:0:60:black",
-                "-pix_fmt", "yuv420p", str(path),
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=640x360:rate=25:duration=2",
+                "-vf",
+                "pad=640:480:0:60:black",
+                "-pix_fmt",
+                "yuv420p",
+                str(path),
             ],
             check=True,
         )
@@ -437,3 +459,42 @@ class TestSourceAnalysis:
         chain = frames.build_filter(geometry, deinterlace=True)
 
         assert chain.index("yadif") < chain.index("scale=")
+
+
+class TestDisplayAspect:
+    """The raster has non-square pixels, so cropping must target the screen.
+
+    An AES drives a 4:3 television with a 320x224 raster, which makes a
+    pixel 0.9333 as wide as it is tall. Cropping a source to the raster's
+    own ratio therefore squashes the picture by that much once it is
+    displayed; cropping to 4:3 is what arrives undistorted.
+    """
+
+    def displayed_aspect(self, geometry) -> float:
+        width, height = geometry.image
+        return (width / height) * frames.PIXEL_ASPECT
+
+    def test_a_widescreen_source_keeps_its_shape(self):
+        geometry = frames.plan_geometry(1280, 720)
+
+        crop_w, crop_h = geometry.crop
+        assert crop_w / crop_h == pytest.approx(self.displayed_aspect(geometry), rel=1e-3)
+
+    def test_a_four_by_three_source_is_not_cropped_sideways(self):
+        geometry = frames.plan_geometry(640, 480)
+
+        assert geometry.crop[0] == 640
+
+    def test_the_crop_is_narrower_than_the_raster_ratio(self):
+        geometry = frames.plan_geometry(1280, 720)
+
+        crop_w, crop_h = geometry.crop
+        assert crop_w / crop_h < 320 / 224
+
+    def test_letterboxing_keeps_the_source_shape_too(self):
+        geometry = frames.plan_geometry(1280, 720, fit="letterbox")
+
+        assert self.displayed_aspect(geometry) == pytest.approx(16 / 9, rel=0.05)
+
+    def test_the_pixel_aspect_follows_from_a_four_by_three_screen(self):
+        assert pytest.approx((4 / 3) * 224 / 320) == frames.PIXEL_ASPECT
