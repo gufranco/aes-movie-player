@@ -10,3 +10,5 @@ assets/clip/
 .mypy_cache/
 .coverage
 build-bake.log
+core
+core.*
