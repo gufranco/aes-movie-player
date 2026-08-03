@@ -4,59 +4,115 @@ Quick start for resuming the AES movie player in a fresh session.
 
 ## Open the session in the right folder
 
-From a terminal:
-
 ```bash
 cd ~/aes-movie-player && claude
 ```
 
-Starting Claude Code from inside `~/aes-movie-player` sets the working directory so all paths resolve against this project, not DoomNG.
+Starting from inside the project sets the working directory so paths
+resolve here rather than against DoomNG.
 
 ## State at handoff
 
-The spike is done. A 20 second clip bakes, builds, boots in geolith, and the rendered picture matches the baker's own model of it.
+A full ten minute movie bakes, builds, and plays with sound and a working
+transport. The baker chooses its own quality tier by measuring the source,
+and a rate controller guarantees the result fits the cartridge.
 
-- The baker is complete for the techniques it implements: 207 tests, 99 percent coverage, ruff and mypy clean.
-- The cart plays the clip at the vblank rate and loops. There is no menu, no transport, and no audio yet.
-- Capture verification is automated. `tools/scripts/verify_capture.py` finds the baked frame that best matches a geolith screenshot and reports the error, so a regression shows up as a number rather than an opinion.
-- The design document under `specs/` carries the measurements, the lever sweep, and the corrections they forced.
+- [`README.md`](README.md) is the entry point: what it is, the ceilings, and
+  how to bake, build, and verify.
+- The design document under `specs/` carries every measurement and, more
+  usefully, the corrections that measurements forced.
+- Tests, ruff, and mypy are clean.
 
-## Reproducing the spike
+## What the full-length bake settled
 
-The source clip is CC-BY Blender Foundation and is not committed. Fetch it, then bake and build:
+A 9:56 source at the automatically selected `long` tier:
+
+| Quantity | Value |
+|---|---|
+| Frames | 35,274 |
+| Tiles used | 569,787 of a 1,048,576 budget |
+| Dictionary full | no |
+| Command stream | 3.0 MB across 3 of 8 banks |
+| Controller peak threshold | 0.0155, against a 0.004 tier floor |
+
+Calibration predicted 913,858 tiles and the bake used 569,787, so the
+estimate ran about 1.6 times high. That is the safe direction, and it is
+inherent to sampling: window boundaries look like cuts and earn keyframes a
+real bake never spends, and a short sample cannot see the dictionary reuse
+that accumulates across a whole feature. The consequence is that `auto`
+picks a more conservative tier than strictly necessary, leaving quality
+unspent. Narrowing that gap is the most valuable open piece of work.
+
+## Corrections that overturned earlier conclusions
+
+Anything in an older note contradicting these is wrong.
+
+- **C-ROM bankswitching does not exist.** Neither geolith nor MAME implements
+  it on any board, including every bootleg mapper, and it could not exist:
+  2^20 tiles at 128 bytes is exactly the 128 MiB the tile number addresses.
+  128 MiB is an absolute ceiling, not a per-bank window.
+- **The command stream is not a second constraint.** It banks across 8 MiB of
+  program ROM and used 3 MB for ten minutes, leaving over half spare.
+- **Scene-cut detection was the dominant cost.** Counting slots that differ
+  at all fired on 22% of frames on real footage. Counting only slots whose
+  source moved past a floor drops that to a handful.
+- **Frame blending was rejected on sight** after the error metric endorsed
+  it. The metric scores a blended frame as closer to the source sequence;
+  the eye reads the same average as a smear.
+- **Motion masking is a dead end.** Across factors from 20 to 3000 the tile
+  count did not move while error rose fourfold. Unlike a codec with
+  residuals, a deferred tile here is interned later regardless.
+- **`mean_error` is not a quality measure.** It averages the palette error of
+  tiles that were written, so it improves when the encoder skips work. Use
+  `displayed_error`, which charges every slot of every frame against the true
+  source frame. Neither is trustworthy for temporal levers.
+
+## Reproducing
+
+The source clips are CC-BY Blender Foundation and are not committed.
 
 ```bash
 mkdir -p assets/clip && cd assets/clip
 curl -fLO https://download.blender.org/peach/bigbuckbunny_movies/big_buck_bunny_720p_h264.mov.zip
 unzip -o big_buck_bunny_720p_h264.mov.zip && cd ../..
 
+uv --project tools run python -m aesmovie.plan \
+  --source assets/clip/big_buck_bunny_720p_h264.mov
+
 uv --project tools run python -m aesmovie.bake \
   --source assets/clip/big_buck_bunny_720p_h264.mov \
-  --start 425 --duration 20.0 --build-dir build \
-  --scene-cut-ratio 0.90 --tolerance 0.0005 --keyframe-interval 90 \
-  --preview build/preview-spike.mkv --report-json build/report-spike.json
+  --start 0 --duration 596 --quality auto \
+  --build-dir build --preview build/preview.mp4
 
 bash toolchain/build-in-docker.sh
 bash tools/scripts/capture_rom.sh 900 build/capture.png
-uv --project tools run python tools/scripts/verify_capture.py \
-  --capture build/capture.png --preview build/preview-spike.mkv
+bash tools/scripts/verify_mame.sh
 ```
 
-The `.mkv` preview is lossless and is what the verifier compares against. Pass a `.mp4` instead for a small shareable copy.
+A bake outside the build tree needs its artifacts copied into `build/`
+first. The generated assembly names its blobs by filename and the build
+passes `-I` for the baked directory, so nothing needs rewriting by hand.
 
-## What the spike settled
+## Where to pick up
 
-- C-ROM costs about 30 MB per minute on hard content, so one 128 MiB bank holds 4.5 minutes and the 8 banks hold roughly 36 minutes. A feature does not fit; a 30 minute program does.
-- Quality came out better than expected. Mean error is about 0.025 Oklab, near the just-noticeable threshold, and tiling is not obvious in stills.
-- Flip dedup is worth nothing on real footage, 0.08 percent, against an estimate of 2x.
-- The command stream is a second constraint nobody accounted for. At 1.08 MB per minute it outgrows the 1 MiB P-ROM window long before C-ROM fills.
+1. **Close the calibration gap.** The estimate runs about 1.6x high, which
+   costs a whole tier of quality on a feature. A second calibration pass on
+   the selected tier, or a correction learned from the first minutes of the
+   real bake, would recover most of it.
+2. **Judge `maximum` and `extreme` visually.** Numbers exist for both and no
+   one has looked at them, yet `auto` will select them for a long source.
+   Given that blending was rejected after the metric endorsed it, numbers
+   alone are not sufficient evidence here.
+3. **Validate the ladder on live action.** The relative costs between tiers
+   were measured on dense animation. The absolute rate is measured per
+   source, but the shape of the ladder is not.
 
-## The first thing to decide next
+## Constraints to keep in view
 
-Command-stream size gates the transport work more than the controls themselves do. Before building the menu, pick how the stream is stored: bankswitched P-ROM, an LZ or entropy codec decoded by the 68000, or a keyframe cadence tuned per scene. Keyframes are most of the stream, so cheaper keyframes may be the largest single win.
-
-## Key constraints to keep in view
-
-- The only hard video ceiling is 128 MiB of C-ROM per bank window, from the 20-bit tile number. Bankswitch across the 8 banks for longer runtimes.
-- Audio is never the limit. ADPCM-B is 16 MiB, one continuous loopable mono sample, about 25 minutes at 22 kHz. The `.neo` V2 region is ADPCM-B; the MAME dataarea name still needs checking.
-- There is no framebuffer, so no additive residuals. Every correction points a slot at a tile that already exists.
+- 128 MiB of character ROM is the absolute video ceiling. There is no bank
+  register and there cannot be one.
+- Audio is rarely the limit. ADPCM-B is 16 MiB, one continuous loopable mono
+  sample, about 25 minutes at 22 kHz, and the baker lowers the rate for
+  anything longer.
+- There is no framebuffer, so no additive residuals. Every correction points
+  a slot at a tile that already exists.

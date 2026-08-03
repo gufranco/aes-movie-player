@@ -182,3 +182,35 @@ class TestRomLayout:
 
         with pytest.raises(ValueError, match="16 MiB"):
             adpcmb.build_rom(encoded, pad_to=(16 << 20) + 256)
+
+
+class TestAdaptiveRates:
+    """The planner lowers the rate for long movies, so every rate it can pick is checked."""
+
+    RATES = (8000.0, 11025.0, 16000.0, 17600.0, 20000.0, 22050.0)
+
+    def signal(self, rate_hz: float) -> np.ndarray:
+        count = int(rate_hz)
+        t = np.arange(count) / rate_hz
+        tone = 12000 * np.sin(2 * np.pi * 440 * t) + 5000 * np.sin(2 * np.pi * 1970 * t)
+        return tone.astype(np.int16)
+
+    @pytest.mark.parametrize("rate_hz", RATES)
+    def test_it_reproduces_the_signal(self, rate_hz):
+        source = self.signal(rate_hz)
+
+        encoded = adpcmb.encode(source, rate_hz=rate_hz)
+        decoded = YmfmDecoder().decode(encoded.payload)[: source.size]
+
+        correlation = float(
+            np.corrcoef(source.astype(np.float64), decoded.astype(np.float64))[0, 1]
+        )
+        assert correlation > 0.99
+
+    @pytest.mark.parametrize("rate_hz", RATES)
+    def test_the_rate_register_lands_within_a_hundred_ppm(self, rate_hz):
+        delta_n = adpcmb.delta_n_for(rate_hz)
+
+        actual = adpcmb.rate_for(delta_n)
+
+        assert abs(actual - rate_hz) / rate_hz < 1e-4

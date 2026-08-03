@@ -17,6 +17,7 @@ import argparse
 import struct
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -38,13 +39,31 @@ def _decode_rgb(path: Path) -> bytes:
     ).stdout
 
 
-def decode_preview(path: Path) -> np.ndarray:
-    """Every rendered frame from a lossless preview."""
+def stream_preview(path: Path) -> Iterator[np.ndarray]:
+    """Rendered frames from a preview, one at a time.
+
+    A feature-length preview decodes to several gigabytes of raw RGB, so
+    holding all of it to search for one matching frame exhausts memory
+    and the process is killed. Reading the pipe a frame at a time keeps
+    the cost at one frame regardless of how long the movie runs.
+    """
     stride = RASTER_WIDTH * RASTER_HEIGHT * 3
-    payload = _decode_rgb(path)
-    return np.frombuffer(payload[: len(payload) // stride * stride], np.uint8).reshape(
-        -1, RASTER_HEIGHT, RASTER_WIDTH, 3
+    process = subprocess.Popen(
+        ["ffmpeg", "-v", "error", "-i", str(path), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        stdout=subprocess.PIPE,
     )
+    if process.stdout is None:
+        msg = "ffmpeg produced no output pipe"
+        raise RuntimeError(msg)
+    try:
+        while True:
+            payload = process.stdout.read(stride)
+            if len(payload) < stride:
+                return
+            yield np.frombuffer(payload, np.uint8).reshape(RASTER_HEIGHT, RASTER_WIDTH, 3)
+    finally:
+        process.stdout.close()
+        process.wait()
 
 
 def decode_capture(path: Path) -> np.ndarray:
@@ -137,14 +156,7 @@ def main(argv: list[str]) -> int:
     if args.baked is not None and args.frame is None:
         parser.error("--baked needs --frame")
 
-    capture = decode_capture(args.capture)
-    reference = (
-        decode_preview(args.preview)
-        if args.preview is not None
-        else reconstruct_frame(args.baked, args.frame)[None]
-    )
-
-    capture = downscale_capture(capture)
+    capture = downscale_capture(decode_capture(args.capture))
 
     height, width = capture.shape[:2]
     if height != RASTER_HEIGHT:
@@ -163,18 +175,33 @@ def main(argv: list[str]) -> int:
         )
         return 2
 
-    cropped = reference[:, :, left:right, :].astype(np.int16)
-    error = np.abs(cropped - capture.astype(np.int16)).mean(axis=(1, 2, 3))
-    best = int(np.argmin(error))
+    reference = (
+        stream_preview(args.preview)
+        if args.preview is not None
+        else iter([reconstruct_frame(args.baked, args.frame)])
+    )
+    target = capture.astype(np.int16)
+    best, best_error, best_frame, count = -1, float("inf"), None, 0
+    worst = 0.0
+    for index, frame in enumerate(reference):
+        cropped = frame[:, left:right, :].astype(np.int16)
+        error = float(np.abs(cropped - target).mean())
+        worst = max(worst, error)
+        if error < best_error:
+            best, best_error, best_frame = index, error, cropped
+        count = index + 1
+    if best_frame is None:
+        print("the reference produced no frames", file=sys.stderr)
+        return 2
 
-    print(f"best match: rendered frame {best} of {len(reference)}")
-    print(f"mean absolute error: {error[best]:.4f} of 255")
-    print(f"exact pixel match: {np.array_equal(cropped[best].astype(np.uint8), capture)}")
-    print(f"worst frame error: {error.max():.4f}, median {np.median(error):.4f}")
+    print(f"best match: rendered frame {best} of {count}")
+    print(f"mean absolute error: {best_error:.4f} of 255")
+    print(f"exact pixel match: {np.array_equal(best_frame.astype(np.uint8), capture)}")
+    print(f"worst frame error: {worst:.4f}")
 
-    if error[best] > args.max_mean_error:
+    if best_error > args.max_mean_error:
         print(
-            f"FAIL: best match error {error[best]:.4f} exceeds {args.max_mean_error}",
+            f"FAIL: best match error {best_error:.4f} exceeds {args.max_mean_error}",
             file=sys.stderr,
         )
         return 1

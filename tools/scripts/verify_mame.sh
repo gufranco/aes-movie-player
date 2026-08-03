@@ -7,12 +7,13 @@ BUILD="${BUILD:-build}"
 BIOS_ZIP="${BIOS_ZIP:-$HOME/Library/Application Support/RetroArch/system/neogeo.zip}"
 BIOS_ROM="${BIOS_ROM:-uni-bios_2_3.rom}"
 BIOS_OPTION="${BIOS_OPTION:-unibios23}"
+PREVIEW="${PREVIEW:-$BUILD/preview-spike.mkv}"
 
 if ! command -v mame >/dev/null; then
     echo "mame not found on PATH" >&2
     exit 1
 fi
-for required in "$BUILD/aesmovie.zip" "$BUILD/mame-hash/neogeo.xml" "$BUILD/preview-spike.mkv"; do
+for required in "$BUILD/aesmovie.zip" "$BUILD/mame-hash/neogeo.xml" "$PREVIEW"; do
     if [[ ! -f "$required" ]]; then
         echo "missing $required; bake and build first" >&2
         exit 1
@@ -45,5 +46,5 @@ if [[ -z "$SHOT" ]]; then
 fi
 
 uv --project tools run python tools/scripts/verify_capture.py \
-    --capture "$SHOT" --preview "$BUILD/preview-spike.mkv" \
+    --capture "$SHOT" --preview "$PREVIEW" \
     --overscan 0 --max-mean-error "$MAX_ERROR"

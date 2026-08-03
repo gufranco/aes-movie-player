@@ -100,7 +100,7 @@ class TestDecoding:
     def test_the_preview_decodes_back_to_the_written_frames(self, rendered):
         frames, preview, _ = rendered
 
-        decoded = verify_capture.decode_preview(preview)
+        decoded = np.stack(list(verify_capture.stream_preview(preview)))
 
         assert np.array_equal(decoded, frames)
 
@@ -227,7 +227,7 @@ class TestReconstruction:
 
         rebuilt = verify_capture.reconstruct_frame(outcome.build_dir / "baked", frame)
 
-        reference = verify_capture.decode_preview(tmp_path / "ref.mkv")[frame]
+        reference = np.stack(list(verify_capture.stream_preview(tmp_path / "ref.mkv")))[frame]
         assert np.array_equal(rebuilt, reference)
 
     def test_reconstruction_matches_at_an_intermediate_frame(self, tmp_path):
@@ -235,7 +235,7 @@ class TestReconstruction:
 
         rebuilt = verify_capture.reconstruct_frame(outcome.build_dir / "baked", 3)
 
-        reference = verify_capture.decode_preview(tmp_path / "ref.mkv")[3]
+        reference = np.stack(list(verify_capture.stream_preview(tmp_path / "ref.mkv")))[3]
         assert np.array_equal(rebuilt, reference)
 
     def test_a_capture_verifies_against_the_baked_artifacts(self, tmp_path, capsys):
@@ -265,3 +265,21 @@ class TestReconstruction:
 
         with pytest.raises(SystemExit):
             verify_capture.main(["--capture", str(capture)])
+
+
+class TestStreamingIsBounded:
+    """A feature-length preview must not be held in memory to search it."""
+
+    def test_it_yields_frames_one_at_a_time(self, tmp_path):
+        preview = tmp_path / "ref.mkv"
+        write_lossless(preview, make_frames(4, seed=3))
+
+        first = next(verify_capture.stream_preview(preview))
+
+        assert first.shape == (verify_capture.RASTER_HEIGHT, verify_capture.RASTER_WIDTH, 3)
+
+    def test_it_yields_every_frame(self, tmp_path):
+        preview = tmp_path / "ref.mkv"
+        write_lossless(preview, make_frames(4, seed=3))
+
+        assert len(list(verify_capture.stream_preview(preview))) == 4

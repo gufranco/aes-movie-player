@@ -160,7 +160,11 @@ The baker lives under `tools/`, the cart under `src/`, and every generated artif
 
 | Path | Role |
 |------|------|
+| `README.md` | what the project is, the ceilings, and how to bake, build, and verify |
 | `tools/pyproject.toml` | uv project for the baker |
+| `tools/aesmovie/quality.py` | quality ladder, tier selection, and the plan report |
+| `tools/aesmovie/calibrate.py` | measures a source's real tile rate before a bake |
+| `tools/aesmovie/plan.py` | reports what a source can become without baking it |
 | `tools/aesmovie/neocolor.py` | Neo Geo color model, OKLab distance |
 | `tools/aesmovie/frames.py` | ffmpeg decode, crop, scale, vblank-rate resample |
 | `tools/aesmovie/palettes.py` | per-tile palette clustering and assignment |
@@ -348,6 +352,77 @@ made the picture sharper and the movie slightly longer at the same time:
 at a hold of 4, 41,989 tiles with a blend width of 8 against 39,644
 without. The only thing it bought was judder concealment, which now has
 to be paid for by choosing a frame hold the viewer accepts unaided.
+
+### Full-length bake, verified end to end, 2026-08-03
+
+The first bake of a whole movie rather than a sample. 9:56 of Big Buck
+Bunny, tier chosen by `--quality auto`.
+
+| Quantity | Value |
+|---|---|
+| Frames | 35,274 |
+| Tier chosen | `long`, 14.8 fps, chroma 0.25, denoise 1.0 |
+| Tiles used | 569,787 of a 1,048,576 budget |
+| Dictionary full | no |
+| Command stream | 3.0 MB across 3 of 8 banks |
+| Controller peak threshold | 0.0155 against a 0.004 floor |
+| Cartridge | 139 MB `.neo` |
+
+Both emulators were re-verified against this cart, since the previous
+hardware checks predated every encoder change.
+
+- **geolith: exact.** Frame 1190 reconstructed from the cart's own C-ROM
+  bytes, command stream, and palette blob matches the emulator's output
+  pixel for pixel, 0.0000 error. That exercises the packed tile bytes, the
+  SCB attribute words, the palette upload, the run-coded stream, and the
+  player's VRAM writes, at full length.
+- **MAME: 1.0066 mean, 5 of 255 worst, plus one column.** Column 0 comes back
+  black across all 224 rows where the reconstruction has colour. The
+  geolith capture is cropped by its 8 pixel overscan so that column was
+  never visible there. Excluding it, the residual is a smooth per-level
+  difference bounded at 5 of 255, which is the signature of a different
+  digital-to-analog model rather than a structural disagreement. The baker
+  targets geolith's resistor-ladder model, which is the one that models the
+  board. Both findings are emulator-side rather than cart-side.
+
+The command stream never came close to binding: 3 MB of 8 MiB for ten
+minutes, which retires the old worry that it would outgrow the window.
+
+### Calibration runs about 1.6 times high
+
+Calibration predicted 913,858 tiles; the bake used 569,787. The estimate is
+pessimistic by design, and both causes are inherent to sampling. Each
+window boundary looks like a cut and earns a keyframe a real bake never
+spends, and a short sample cannot see the dictionary reuse that accumulates
+across a whole feature.
+
+The direction is safe but the magnitude is expensive: it costs roughly a
+whole tier of quality on a feature-length source. A second calibration pass
+at the selected tier, or a correction learned from the first minutes of the
+real bake, would recover most of it.
+
+### The ladder holds on live action, with soft ends
+
+The relative costs were measured on dense animation. Re-measured on Tears of
+Steel, live action with visual effects, calibrated at `standard`:
+
+| Tier | Measured relative | Ladder relative | Delta |
+|---|---|---|---|
+| archival | 1.329 | 1.678 | -21% |
+| high | 1.275 | 1.515 | -16% |
+| standard | 1.000 | 1.000 | 0% |
+| extended | 0.685 | 0.686 | 0% |
+| long | 0.435 | 0.466 | -7% |
+| maximum | 0.287 | 0.335 | -14% |
+| extreme | 0.176 | 0.238 | -26% |
+
+The middle of the ladder transfers almost exactly. Both ends are cheaper on
+live action than the animation-derived figures claim, by up to a quarter.
+Every error is in the conservative direction, since a tier that costs less
+than predicted leaves capacity unused rather than overrunning, so selection
+stays safe. It does compound with the sampling pessimism above, and the two
+together are why `auto` currently picks lower quality than a source can
+actually support.
 
 ### Rate control, and why the first attempt failed
 
