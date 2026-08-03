@@ -146,6 +146,7 @@ _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 #define MOVIE_CHROMA_PERCENT {chroma_percent}
 #define MOVIE_CROM_PERCENT {crom_percent}
 #define MOVIE_AUDIO_HZ {audio_hz}
+#define MOVIE_FRAME_HOLD {frame_hold}
 #define MOVIE_KEYFRAME_COUNT {keyframes}
 #define MOVIE_GRID_COLS {cols}
 #define MOVIE_GRID_ROWS {rows}
@@ -327,6 +328,7 @@ def _write_sources(
             chroma_percent=round(request.chroma_weight * 100),
             crom_percent=round(100 * result.stats.crom_payload_bytes / CROM_BANK_BYTES),
             audio_hz=round(request.audio_rate_hz),
+            frame_hold=request.frame_hold,
             base_bank=result.palette_set.base_bank,
             keyframes=result.stats.keyframe_count,
             cols=encode.GRID_COLS,

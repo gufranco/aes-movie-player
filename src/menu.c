@@ -138,3 +138,109 @@ void menu_draw(transport_state state, uint16_t speed, uint32_t frame, uint32_t t
     fix_poke(MENU_SLASH_COL, MENU_TEXT_ROW, FIX_TILE_SLASH);
     draw_clock(MENU_TOTAL_COL, MENU_TEXT_ROW, frame_to_seconds(total));
 }
+
+#define DEBUG_TOP_ROW   2
+#define DEBUG_ROWS      9
+#define DEBUG_LEFT      1
+
+static uint16_t glyph_for(char code)
+{
+    if (code >= '0' && code <= '9') {
+        return (uint16_t)(FIX_TILE_DIGIT0 + (code - '0'));
+    }
+    if (code >= 'A' && code <= 'Z') {
+        return (uint16_t)(FIX_TILE_A + (code - 'A'));
+    }
+    switch (code) {
+    case '%':
+        return FIX_TILE_PERCENT;
+    case '.':
+        return FIX_TILE_DOT;
+    case '-':
+        return FIX_TILE_DASH;
+    case '/':
+        return FIX_TILE_SLASH;
+    case ':':
+        return FIX_TILE_COLON;
+    default:
+        return FIX_TILE_PANEL;
+    }
+}
+
+static uint16_t draw_text(uint16_t col, uint16_t row, const char *text)
+{
+    while (*text != '\0') {
+        fix_poke(col++, row, glyph_for(*text++));
+    }
+    return col;
+}
+
+/* Right-aligned so a value that grows a digit does not shift the label
+ * beside it, which matters when reading these while the movie runs. */
+static uint16_t draw_number(uint16_t col, uint16_t row, uint32_t value, uint16_t digits)
+{
+    uint16_t index = digits;
+
+    while (index--) {
+        fix_poke((uint16_t)(col + index), row, (uint16_t)(FIX_TILE_DIGIT0 + value % 10u));
+        value /= 10u;
+    }
+    return (uint16_t)(col + digits);
+}
+
+static void draw_field(uint16_t col, uint16_t row, const char *label, uint32_t value,
+                       uint16_t digits)
+{
+    uint16_t cursor = draw_text(col, row, label);
+
+    draw_number((uint16_t)(cursor + 1), row, value, digits);
+}
+
+void menu_debug_hide(void)
+{
+    for (uint16_t col = 0; col < MENU_COLS; col++) {
+        for (uint16_t row = 0; row < DEBUG_ROWS; row++) {
+            fix_poke(col, (uint16_t)(DEBUG_TOP_ROW + row), FIX_TILE_BLANK);
+        }
+    }
+}
+
+void menu_debug(const debug_stats *stats)
+{
+    uint16_t row = DEBUG_TOP_ROW;
+
+    for (uint16_t col = 0; col < MENU_COLS; col++) {
+        for (uint16_t line = 0; line < DEBUG_ROWS; line++) {
+            fix_poke(col, (uint16_t)(DEBUG_TOP_ROW + line), FIX_TILE_PANEL);
+        }
+    }
+
+    draw_field(DEBUG_LEFT, row, "WIDTH", MOVIE_IMAGE_WIDTH, 3);
+    draw_field(20, row, "HIGH", MOVIE_IMAGE_HEIGHT, 3);
+    row++;
+    draw_field(DEBUG_LEFT, row, "FPS", MOVIE_FPS_NUM / MOVIE_FPS_DEN, 2);
+    draw_field(20, row, "HOLD", MOVIE_FRAME_HOLD, 1);
+    row++;
+    draw_text(DEBUG_LEFT, row, "TIER");
+    draw_text((uint16_t)(DEBUG_LEFT + 5), row, MOVIE_TIER_NAME);
+    draw_field(20, row, "CHROMA", MOVIE_CHROMA_PERCENT, 3);
+    row++;
+    draw_field(DEBUG_LEFT, row, "EPOCHS", MOVIE_EPOCH_COUNT, 4);
+    draw_field(20, row, "CROM", MOVIE_CROM_PERCENT, 3);
+    row++;
+    draw_field(DEBUG_LEFT, row, "AUDIO HZ", MOVIE_AUDIO_HZ, 5);
+    draw_field(20, row, "TILES", MOVIE_TILE_COUNT / 1000u, 4);
+    row++;
+
+    draw_field(DEBUG_LEFT, row, "FRAME", stats->frame, 6);
+    draw_field(20, row, "OF", stats->total, 6);
+    row++;
+    draw_field(DEBUG_LEFT, row, "EPOCH", stats->epoch, 4);
+    draw_field(20, row, "BANK", stats->bank, 1);
+    row++;
+    draw_field(DEBUG_LEFT, row, "UPDATE", stats->updates, 3);
+    draw_field(20, row, "PEAK", stats->peak_updates, 3);
+    row++;
+    draw_field(DEBUG_LEFT, row, "APAGE", stats->audio_page, 5);
+    draw_field(20, row, "OVERRUN", stats->overruns, 5);
+}

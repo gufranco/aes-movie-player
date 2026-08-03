@@ -37,6 +37,7 @@ static const uint16_t speed_ladder[] = {2, 5, 10};
 #define SOUND_ACK_TIMEOUT     0x4000
 
 static uint16_t stream_bank = 0xFFFF;
+static uint16_t frame_updates;
 static uint8_t audio_running = 0;
 
 static void sound_send(uint8_t code)
@@ -222,6 +223,7 @@ static void apply_frame(uint32_t frame)
     }
     cursor = (const uint16_t *)(PROM_BANK_WINDOW + (offset % PROM_BANK_BYTES));
     runs = *cursor++;
+    frame_updates = 0;
 
     while (runs--) {
         uint16_t address = *cursor++;
@@ -229,6 +231,7 @@ static void apply_frame(uint32_t frame)
 
         REG_VRAMADDR = address;
         REG_VRAMMOD = 1;
+        frame_updates = (uint16_t)(frame_updates + tiles);
         while (tiles--) {
             REG_VRAMRW = *cursor++;
             REG_VRAMRW = *cursor++;
@@ -282,6 +285,8 @@ int main(void)
     uint16_t rewind_countdown = REWIND_FRAMES_PER_STEP;
     uint8_t previous_pad = 0;
     uint8_t previous_start = 0;
+    debug_stats diag = {0};
+    uint8_t debug_visible = 0;
     uint16_t overlay_tick = 0;
     uint8_t overlay_visible = 0;
 
@@ -323,6 +328,12 @@ int main(void)
                 audio_halt();
             } else {
                 audio_seek(frame);
+            }
+        }
+        if (pressed & PAD_UP) {
+            debug_visible = (uint8_t)!debug_visible;
+            if (!debug_visible) {
+                menu_debug_hide();
             }
         }
         if (pressed & PAD_B) {
@@ -399,6 +410,17 @@ int main(void)
             break;
         }
 
+        /* Read before anything else touches the raster. Out of vblank
+         * here means this frame's work ran past the deadline, which is
+         * the player falling behind while the sound chip keeps its own
+         * clock: exactly how audio ends up ahead of picture. */
+        if (!in_vblank()) {
+            diag.overran = 1;
+            diag.overruns++;
+        } else {
+            diag.overran = 0;
+        }
+
         if (overlay_timer) {
             overlay_timer--;
             if (!overlay_visible || (overlay_tick & OVERLAY_REDRAW_MASK) == 0) {
@@ -408,6 +430,19 @@ int main(void)
         } else if (overlay_visible) {
             menu_hide();
             overlay_visible = 0;
+        }
+
+        if (debug_visible && (overlay_tick & OVERLAY_REDRAW_MASK) == 0) {
+            diag.frame = frame;
+            diag.total = MOVIE_FRAME_COUNT;
+            diag.epoch = resident_epoch;
+            diag.bank = stream_bank;
+            diag.audio_page = audio_page_for(frame);
+            diag.updates = frame_updates;
+            if (frame_updates > diag.peak_updates) {
+                diag.peak_updates = frame_updates;
+            }
+            menu_debug(&diag);
         }
         overlay_tick++;
     }
