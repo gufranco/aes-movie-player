@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
+import subprocess as sp
 from pathlib import Path
 
 import numpy as np
 import pytest
+
+from aesmovie import bake as baker
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "verify_capture.py"
 _spec = importlib.util.spec_from_file_location("verify_capture", SCRIPT)
@@ -183,3 +186,82 @@ class TestUpscaledCaptures:
 
         assert code == 0
         assert "rendered frame 1" in capsys.readouterr().out
+
+
+class TestReconstruction:
+    def bake(self, tmp_path):
+        source = tmp_path / "src.mp4"
+        sp.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=640x360:rate=24:duration=1",
+                "-pix_fmt",
+                "yuv420p",
+                str(source),
+            ],
+            check=True,
+        )
+        build = tmp_path / "build"
+        return baker.run(
+            baker.BakeRequest(
+                source=source,
+                start=0.0,
+                duration=0.2,
+                build_dir=build,
+                palette_count=8,
+                candidates=0,
+                sample_stride=1,
+                preview=tmp_path / "ref.mkv",
+            )
+        )
+
+    def test_reconstruction_matches_the_rendered_preview(self, tmp_path):
+        outcome = self.bake(tmp_path)
+        frame = outcome.result.stats.frames - 1
+
+        rebuilt = verify_capture.reconstruct_frame(outcome.build_dir / "baked", frame)
+
+        reference = verify_capture.decode_preview(tmp_path / "ref.mkv")[frame]
+        assert np.array_equal(rebuilt, reference)
+
+    def test_reconstruction_matches_at_an_intermediate_frame(self, tmp_path):
+        outcome = self.bake(tmp_path)
+
+        rebuilt = verify_capture.reconstruct_frame(outcome.build_dir / "baked", 3)
+
+        reference = verify_capture.decode_preview(tmp_path / "ref.mkv")[3]
+        assert np.array_equal(rebuilt, reference)
+
+    def test_a_capture_verifies_against_the_baked_artifacts(self, tmp_path, capsys):
+        outcome = self.bake(tmp_path)
+        frame = 5
+        rebuilt = verify_capture.reconstruct_frame(outcome.build_dir / "baked", frame)
+        capture = tmp_path / "shot.png"
+        write_png(capture, rebuilt[:, OVERSCAN : WIDTH - OVERSCAN])
+
+        code = verify_capture.main(
+            [
+                "--capture",
+                str(capture),
+                "--baked",
+                str(outcome.build_dir / "baked"),
+                "--frame",
+                str(frame),
+            ]
+        )
+
+        assert code == 0
+        assert "exact pixel match: True" in capsys.readouterr().out
+
+    def test_verifying_without_a_reference_is_rejected(self, tmp_path):
+        capture = tmp_path / "lonely.png"
+        write_png(capture, make_frames(1, seed=8)[0][:, OVERSCAN : WIDTH - OVERSCAN])
+
+        with pytest.raises(SystemExit):
+            verify_capture.main(["--capture", str(capture)])

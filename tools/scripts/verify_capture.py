@@ -14,11 +14,17 @@ frames are cropped the same way before comparison.
 from __future__ import annotations
 
 import argparse
+import struct
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from aesmovie import neocolor
+from tests.geolith_model import GeolithTileReader, StreamPlayer
 
 RASTER_WIDTH = 320
 RASTER_HEIGHT = 224
@@ -83,16 +89,60 @@ def downscale_capture(capture: np.ndarray) -> np.ndarray:
     return capture[offset::factor, offset::factor]
 
 
+def _palette_colors(blob: bytes) -> np.ndarray:
+    words = np.frombuffer(blob, ">u2").reshape(-1, neocolor.PALETTE_COLORS)[:, 1:]
+    r5 = ((words >> 8) & 0x0F) << 1 | ((words >> 14) & 1)
+    g5 = ((words >> 4) & 0x0F) << 1 | ((words >> 13) & 1)
+    b5 = (words & 0x0F) << 1 | ((words >> 12) & 1)
+    return ((r5 << 10) | (g5 << 5) | b5).astype(np.uint16)
+
+
+def reconstruct_frame(baked: Path, frame: int, *, base_bank: int = 16) -> np.ndarray:
+    """Rebuild one frame's picture from the cart artifacts alone.
+
+    Replaying the stream into the VRAM model and rendering from the
+    packed C-ROM reproduces exactly what the hardware shows, without a
+    preview video. Long bakes cannot keep every rendered frame in
+    memory, so this is the only reference available for them.
+    """
+    baked = Path(baked)
+    stream = (baked / "stream.bin").read_bytes()
+    index = (baked / "index.bin").read_bytes()
+    offsets = struct.unpack(f">{len(index) // 4}I", index)
+    if not 0 <= frame < len(offsets):
+        msg = f"frame {frame} is outside the {len(offsets)} frame movie"
+        raise ValueError(msg)
+
+    player = StreamPlayer()
+    for step in range(frame + 1):
+        player.apply(stream, offsets[step])
+
+    reader = GeolithTileReader((baked / "c1.bin").read_bytes(), (baked / "c2.bin").read_bytes())
+    colors = _palette_colors((baked / "palettes.bin").read_bytes())
+    return neocolor.color_index_to_rgb(player.render(reader, colors, base_bank))
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Match a capture against the baked render.")
     parser.add_argument("--capture", type=Path, required=True)
-    parser.add_argument("--preview", type=Path, required=True)
+    parser.add_argument("--preview", type=Path, default=None)
+    parser.add_argument("--baked", type=Path, default=None)
+    parser.add_argument("--frame", type=int, default=None)
     parser.add_argument("--overscan", type=int, default=8)
     parser.add_argument("--max-mean-error", type=float, default=1.0)
     args = parser.parse_args(argv)
 
+    if args.preview is None and args.baked is None:
+        parser.error("pass either --preview or --baked")
+    if args.baked is not None and args.frame is None:
+        parser.error("--baked needs --frame")
+
     capture = decode_capture(args.capture)
-    reference = decode_preview(args.preview)
+    reference = (
+        decode_preview(args.preview)
+        if args.preview is not None
+        else reconstruct_frame(args.baked, args.frame)[None]
+    )
 
     capture = downscale_capture(capture)
 

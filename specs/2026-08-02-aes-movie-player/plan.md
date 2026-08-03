@@ -173,6 +173,7 @@ The baker lives under `tools/`, the cart under `src/`, and every generated artif
 | `src/menu.h` | fix-layer overlay interface |
 | `src/menu.c` | fix-layer transport overlay, auto-hiding |
 | `tools/aesmovie/fixtiles.py` | generates the S-ROM glyphs the overlay draws with |
+| `tools/aesmovie/neofile.py` | streams the .neo cart container, replacing neosdconv |
 | `src/movie_data.S` | links the baked blobs into the ROM |
 | `toolchain/build-in-docker.sh` | ngdevkit build and .neo packaging |
 | `tools/scripts/capture_rom.sh` | headless geolith capture |

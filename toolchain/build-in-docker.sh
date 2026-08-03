@@ -14,11 +14,10 @@ if [[ "$(uname)" != "Linux" ]]; then
         retry apt-get update -q >/dev/null
         retry apt-get install -y --no-install-recommends \
           software-properties-common ca-certificates make pkg-config rsync zip \
-          nodejs npm binutils python3 >/dev/null
+          binutils python3 >/dev/null
         retry add-apt-repository -y ppa:dciabrin/ngdevkit >/dev/null
         retry apt-get update -q >/dev/null
         retry apt-get install -y --no-install-recommends ngdevkit ngdevkit-gngeo >/dev/null
-        retry npm install -g --silent neosdconv@0.4.0 >/dev/null 2>&1
         bash toolchain/build-in-docker.sh
     '
 fi
@@ -95,8 +94,7 @@ rm -f "$ROM/p1.raw" "$ROM/m1.ihx"
 echo "[rom] sizes:"
 ls -la "$ROM"
 
-neosdconv -i "$ROM" -o "$BUILD/aesmovie.neo" \
-    -n "AES Movie Player" -g Other -y 2026 -m aesmovie '-#' 9999 -s 1
+python3 tools/aesmovie/neofile.py --rom-dir "$ROM" --output "$BUILD/aesmovie.neo"
 
 ls -la "$BUILD/aesmovie.neo"
 echo "DONE"
