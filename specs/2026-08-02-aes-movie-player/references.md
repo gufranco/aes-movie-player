@@ -53,6 +53,20 @@ geolith models the board; MAME is a second implementation sharing no code with i
 - **The two emulators disagree on the program-ROM bank register.** MAME's `write_banksel` masks the value with `0x07`, giving 8 banks of 1 MiB mapped from offset 1 MiB, matching the three-bit latch on the board. geolith derives its mask from the ROM size and permits up to 8 bits. A stream needing more than 8 banks therefore works in geolith and reads the wrong bank on hardware, so the baker enforces the MAME and hardware limit.
 - **Neither emulator implements C-ROM bankswitching**, on any board type, including every bootleg mapper MAME carries. The sprite tile number is 20 bits and MAME masks the resulting address with `m_sprite_gfx_address_mask` derived from the region size. The design's claim that 8 C-ROM banks extend video beyond 128 MiB is not supported, and cannot be: 2^20 tiles at 128 bytes is exactly the 128 MiB the 20-bit number addresses.
 
+## Resident Evil 2 on the Nintendo 64, 2026-08-03
+
+Angel Studios fit a two-CD, 1.2 GB PlayStation game onto a 64 MiB cartridge, with over 15 minutes of full-motion video in a 24 MiB budget, a 165:1 ratio. The console had no video-decode hardware, so the whole decoder ran in software on the RSP. That is the closest prior art to this project's problem: a fixed ROM ceiling, no decode hardware, and a mandate to lose only what a viewer cannot see. Primary technical narration transcribed from the Modern Vintage Gamer video the user cited, [How Resident Evil 2 on the N64 was a Technical Marvel](https://www.youtube.com/watch?v=BaX5YUZ5FLk), cross-read against [Hackaday](https://hackaday.com/2026/02/03/how-resident-evil-2-for-the-n64-kept-its-fmv-cutscenes/) and the [Angel Studios postmortem](https://www.gamedeveloper.com/programming/postmortem-angel-studios-i-resident-evil-2-i-n64-version-). Confidence 8 for the techniques, which two independent sources agree on.
+
+| Technique they used | Why | What it maps to here |
+|---|---|---|
+| Chroma subsampling, horizontal chroma cut to a quarter and bandwidth halved | Vision resolves luminance far more finely than colour | `--chroma-weight`, which scales the `a` and `b` axes of the shared Oklab metric. There is no chroma plane to subsample, since a tile is a palette index, so the equivalent lever is the distance function every stage already shares |
+| Internal resolution reduced, then upscaled on output by RSP microcode | Detail the display cannot resolve is not worth storing | Not applicable. The raster is already the native 320x224 and there is no scaler in the sprite path |
+| Store every other frame, about 15 fps, and cross-fade on the RDP to reach 30 Hz | Halves the payload; blending hides the judder | `--frame-hold` plus `--motion-blur`. They blended at runtime because they had a framebuffer and a blender. This hardware has neither, so the blend is pre-computed at bake time with `tmix`, which is the same average arriving by a different route |
+| Background textures reduced in scenes with more enemies, deliberately, because the viewer is watching the enemies | Attention-weighted bit allocation | Attempted as `--motion-masking`. Measured a dead end here, see below |
+| MusyX sample-based synthesis for music, heavy compression for speech | Music as instructions is far smaller than music as samples | Not applicable. The soundtrack is a single continuous ADPCM-B stream and audio is never the binding constraint |
+
+The one they did not need, and this project does: their codec had residuals, so skipping a block genuinely cost fewer bits. Here a slot either points at a tile that exists in the dictionary or shows a stale one, so deferring an update does not avoid interning the tile. That difference is what kills motion masking below.
+
 ## Caveats
 
 - The exact split of the 20-bit tile number across the odd attribute word, and the exact palette-field width, were reported inconsistently by one fetched summary. Closed on 2026-08-02 by reading geolith, see the section above. Worth a second confirmation against furrtek's programming manual before the design depends on real-hardware behavior that an emulator could have wrong.

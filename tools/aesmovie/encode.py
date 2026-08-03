@@ -19,6 +19,7 @@ dictionary richness is C-ROM.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Final
 
@@ -40,20 +41,26 @@ FRAME_HEIGHT: Final = GRID_ROWS * TILE_PX
 class EncodeOptions:
     palette_count: int = 240
     base_bank: int = 16
-    keyframe_interval: int = 45
-    tolerance: float = 0.0
-    scene_cut_ratio: float = 0.55
+    keyframe_interval: int = 90
+    tolerance: float = 0.0005
+    scene_cut_ratio: float = 0.90
     candidates: int = 12
-    allow_flip: bool = True
     sample_stride: int = 8
     seed: int = 0
     collect_rendered: bool = True
+    allow_flip: bool = False
+    dictionary_capacity: int = 1 << 20
+    frame_hold: int = 1
+    motion_masking: float = 0.0
+    chroma_weight: float = palettes.DEFAULT_CHROMA_WEIGHT
+    scene_cut_floor: float = 0.01
 
 
 @dataclass(frozen=True, slots=True)
 class EncodeStats:
     frames: int
     tile_count: int
+    dictionary_full: bool
     crom_payload_bytes: int
     crom_rom_bytes: int
     stream_bytes: int
@@ -65,6 +72,7 @@ class EncodeStats:
     max_updates: int
     mean_updates: float
     mean_error: float
+    displayed_error: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +98,124 @@ def from_tiles(tiles: npt.NDArray[np.uint16]) -> npt.NDArray[np.uint16]:
     return tiles.transpose(0, 2, 1, 3).reshape(FRAME_HEIGHT, FRAME_WIDTH)
 
 
+def _masked_threshold(
+    current: npt.NDArray[np.uint16],
+    previous: npt.NDArray[np.uint16] | None,
+    targets: npt.NDArray[np.bool_],
+    options: EncodeOptions,
+) -> npt.NDArray[np.float32] | float:
+    """Per-slot error budget, raised where the picture is moving.
+
+    Vision is far less sensitive to spatial detail in a region that is
+    changing quickly, and far more sensitive in one that is still, where
+    an error sits on screen and stays visible. A single flat threshold
+    spends the same precision on both. Scaling the budget by how much
+    the source itself moved buys back tiles from exactly the places the
+    eye cannot inspect them, which is the whole point of a lossy codec.
+
+    A masking factor of zero reproduces the flat threshold.
+
+    Masking is only safe because a skipped slot stays pending and is
+    re-tested every frame. Once its motion stops the budget collapses
+    back to the flat threshold and the slot is corrected, so an error
+    hidden by movement never outlives the movement that hid it.
+    """
+    if options.motion_masking <= 0.0 or previous is None:
+        return options.tolerance
+    moved = _movement(current, previous, targets, options.chroma_weight)
+    return options.tolerance + options.motion_masking * moved
+
+
+def _movement(
+    current: npt.NDArray[np.uint16],
+    previous: npt.NDArray[np.uint16],
+    targets: npt.NDArray[np.bool_],
+    chroma_weight: float,
+) -> npt.NDArray[np.float32]:
+    """Mean squared Oklab distance the source itself moved, per slot."""
+    grid = palettes.oklab_grid(chroma_weight)
+    moved: npt.NDArray[np.float32] = (
+        ((grid[current[targets]] - grid[previous[targets]]) ** 2).sum(axis=3).mean(axis=(1, 2))
+    )
+    return moved
+
+
+def _is_scene_cut(
+    current: npt.NDArray[np.uint16],
+    previous: npt.NDArray[np.uint16] | None,
+    changed: npt.NDArray[np.bool_],
+    index: int,
+    options: EncodeOptions,
+) -> bool:
+    """Whether the picture jumped rather than moved.
+
+    A cut earns a keyframe because a delta could not be cheaper when
+    nearly every slot has to be rewritten anyway. Deciding that on the
+    count of slots that differ at all does not work on photographed
+    material: grain, dither, and any gentle camera move perturb almost
+    every slot by a shade every frame, so a plain count reads a still
+    scene as a cut. Measured on real footage that fired on 22% of all
+    frames, and each false cut rewrote all 280 slots and interned the
+    tiles a delta would have skipped.
+
+    Magnitude separates the two cases cleanly. A slot counts toward a
+    cut only once the source moved further than `scene_cut_floor`, which
+    leaves gradual motion to the delta path where it belongs.
+    """
+    if index == 0 or previous is None:
+        return True
+    if not changed.any():
+        return False
+    moved = _movement(current, previous, changed, options.chroma_weight)
+    jumped = float((moved > options.scene_cut_floor).sum()) / float(changed.size)
+    return jumped >= options.scene_cut_ratio
+
+
+def _select_targets(
+    current: npt.NDArray[np.uint16],
+    previous: npt.NDArray[np.uint16] | None,
+    changed: npt.NDArray[np.bool_],
+    pending: npt.NDArray[np.bool_],
+    *,
+    screen: _Screen,
+    keyframe: bool,
+    options: EncodeOptions,
+) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.bool_]]:
+    """Which slots to redraw this frame, and which stay owed a redraw.
+
+    A keyframe takes every slot and clears the backlog, which is what
+    makes it a seek target. Otherwise a slot is a candidate when its
+    source changed or when an earlier frame skipped it, and it is only
+    redrawn when the picture on screen has drifted past the budget.
+
+    A skipped slot stays pending rather than being forgotten, so an
+    error the encoder chose to tolerate is re-tested on every later
+    frame and repaired as soon as it stops being cheap to hide.
+    """
+    if keyframe:
+        return (
+            np.ones((GRID_ROWS, GRID_COLS), dtype=bool),
+            np.zeros((GRID_ROWS, GRID_COLS), dtype=bool),
+        )
+    targets = changed | pending
+    if options.tolerance <= 0.0 or not targets.any():
+        return targets, np.zeros_like(targets)
+    threshold = _masked_threshold(current, previous, targets, options)
+    keep = np.zeros_like(targets)
+    keep[targets] = screen.drift(current, targets) > threshold
+    return keep, targets & ~keep
+
+
+def _tile_frames(
+    chunks: Iterable[npt.NDArray[np.uint8]],
+) -> Iterator[npt.NDArray[np.uint16]]:
+    """Yield one frame's tile grid at a time from chunks of RGB frames."""
+    for chunk in chunks:
+        grids = to_tiles(neocolor.rgb_to_color_index(chunk))
+        for index in range(grids.shape[0]):
+            yield grids[index]
+
+
 def _validate(clip: npt.NDArray[np.uint8]) -> None:
     if clip.shape[0] == 0:
         msg = "cannot encode an empty clip"
@@ -99,31 +225,46 @@ def _validate(clip: npt.NDArray[np.uint8]) -> None:
         raise ValueError(msg)
 
 
+@dataclass(slots=True)
+class _Totals:
+    """Running counters the encode loop accumulates across frames."""
+
+    keyframe_bytes: int = 0
+    delta_bytes: int = 0
+    error_total: float = 0.0
+    error_pixels: int = 0
+    displayed_error_total: float = 0.0
+    displayed_frames: int = 0
+
+
 def _build_stats(
     *,
     movie: stream.MovieStream,
     dictionary: TileDictionary,
     updates_per_frame: npt.NDArray[np.int32],
-    keyframe_bytes: int,
-    delta_bytes: int,
-    error_total: float,
-    error_pixels: int,
+    totals: _Totals,
 ) -> EncodeStats:
     tile_count = len(dictionary)
     return EncodeStats(
         frames=len(movie),
         tile_count=tile_count,
+        dictionary_full=dictionary.is_full(),
         crom_payload_bytes=tile_count * crom.TILE_BYTES,
         crom_rom_bytes=2 * crom.rom_size_for(tile_count),
         stream_bytes=movie.payload_size(),
         stream_rom_bytes=len(movie.blob()),
-        keyframe_bytes=keyframe_bytes,
-        delta_bytes=delta_bytes,
+        keyframe_bytes=totals.keyframe_bytes,
+        delta_bytes=totals.delta_bytes,
         index_bytes=len(movie.index_blob()),
         keyframe_count=len(movie.keyframes()),
         max_updates=int(updates_per_frame.max()),
         mean_updates=float(updates_per_frame.mean()),
-        mean_error=(error_total / error_pixels) if error_pixels else 0.0,
+        mean_error=(totals.error_total / totals.error_pixels) if totals.error_pixels else 0.0,
+        displayed_error=(
+            (totals.displayed_error_total / totals.displayed_frames)
+            if totals.displayed_frames
+            else 0.0
+        ),
     )
 
 
@@ -142,16 +283,36 @@ class _Screen:
         self, source: npt.NDArray[np.uint16], targets: npt.NDArray[np.bool_]
     ) -> npt.NDArray[np.float32]:
         """Mean squared Oklab distance between the source and the picture on screen."""
-        grid = palettes.oklab_grid()
+        grid = palettes.oklab_grid(self._palette_set.chroma_weight)
         source_lab = grid[source[targets]]
         screen_lab = grid[self.render[targets]]
         return ((source_lab - screen_lab) ** 2).sum(axis=3).mean(axis=(1, 2))
+
+    def fidelity(self, source: npt.NDArray[np.uint16]) -> float:
+        """Mean squared Oklab error of the whole displayed frame.
+
+        Deliberately measured on the unweighted grid over every slot,
+        including the ones the encoder chose not to redraw. `mean_error`
+        averages the palette error of tiles that were written, so it
+        improves when the encoder skips more work, which makes it
+        useless for judging output quality. This is the number that
+        answers whether the picture on screen still matches the source,
+        and no encoder knob can flatter it.
+
+        The comparison is against the true source frame for this refresh,
+        never the frame the encoder chose to hold. Holding a frame across
+        four refreshes is a real error the viewer sees, so measuring
+        against the held copy would score a cheat as free.
+        """
+        grid = palettes.oklab_grid(palettes.DEFAULT_CHROMA_WEIGHT)
+        error: float = float(((grid[source] - grid[self.render]) ** 2).sum(axis=4).mean())
+        return error
 
     def commit(
         self,
         rows: npt.NDArray[np.int64],
         cols: npt.NDArray[np.int64],
-        refs: list[TileRef],
+        refs: list[TileRef | None],
         assignment: palettes.Assignment,
         *,
         force: bool,
@@ -161,6 +322,8 @@ class _Screen:
         updates: list[stream.SlotUpdate] = []
         for slot, (row, col) in enumerate(zip(rows, cols, strict=True)):
             ref = refs[slot]
+            if ref is None:
+                continue
             bank = self._palette_set.bank_of(int(assignment.palette_ids[slot]))
             already = (
                 self.tile[row, col] == ref.index
@@ -189,60 +352,90 @@ class _Screen:
 
 
 def encode(clip: npt.NDArray[np.uint8], options: EncodeOptions) -> EncodeResult:
-    """Encode a clip into a tile dictionary and a keyframe-plus-delta stream."""
+    """Encode a whole in-memory clip. Convenience wrapper over `encode_stream`."""
     _validate(clip)
+    sample = to_tiles(neocolor.rgb_to_color_index(clip[:: max(1, options.sample_stride)]))
+    return encode_stream(
+        [clip],
+        options,
+        sample_tiles=sample.reshape(-1, TILE_PX, TILE_PX),
+        total_frames=clip.shape[0],
+    )
 
-    frame_colors = neocolor.rgb_to_color_index(clip)
-    tiles = to_tiles(frame_colors)
-    frames = tiles.shape[0]
 
-    sample = tiles[:: max(1, options.sample_stride)].reshape(-1, TILE_PX, TILE_PX)
+def encode_stream(
+    chunks: Iterable[npt.NDArray[np.uint8]],
+    options: EncodeOptions,
+    *,
+    sample_tiles: npt.NDArray[np.uint16],
+    total_frames: int,
+    on_render: Callable[[npt.NDArray[np.uint16]], None] | None = None,
+) -> EncodeResult:
+    """Encode frames as they arrive, holding only two frames at a time.
+
+    A cart filled to the character-ROM ceiling is around 15,600 frames.
+    Neither the source nor the rendered output fits in memory at that
+    length, so the palette set is fitted from a strided sample taken in
+    an earlier pass and the frames themselves stream past.
+    """
     palette_set = palettes.build_palette_set(
-        sample, count=options.palette_count, base_bank=options.base_bank, seed=options.seed
+        sample_tiles,
+        count=options.palette_count,
+        base_bank=options.base_bank,
+        seed=options.seed,
+        chroma_weight=options.chroma_weight,
     )
     assigner = palettes.PaletteAssigner(palette_set, candidates=options.candidates)
-    dictionary = TileDictionary(allow_flip=options.allow_flip)
+    dictionary = TileDictionary(allow_flip=options.allow_flip, capacity=options.dictionary_capacity)
     screen = _Screen(palette_set)
     movie = stream.MovieStream()
 
     rendered = (
-        np.zeros((frames, FRAME_HEIGHT, FRAME_WIDTH), dtype=np.uint16)
+        np.zeros((total_frames, FRAME_HEIGHT, FRAME_WIDTH), dtype=np.uint16)
         if options.collect_rendered
         else np.zeros((0, FRAME_HEIGHT, FRAME_WIDTH), dtype=np.uint16)
     )
-    updates_per_frame = np.zeros(frames, dtype=np.int32)
-    keyframe_bytes = 0
-    delta_bytes = 0
-    error_total = 0.0
-    error_pixels = 0
+    updates_per_frame = np.zeros(total_frames, dtype=np.int32)
+    totals = _Totals()
     last_keyframe = -options.keyframe_interval
 
-    for index in range(frames):
-        current = tiles[index]
+    previous: npt.NDArray[np.uint16] | None = None
+    previous_source: npt.NDArray[np.uint16] | None = None
+    pending = np.zeros((GRID_ROWS, GRID_COLS), dtype=bool)
+    hold = max(1, options.frame_hold)
+    held: npt.NDArray[np.uint16] | None = None
+    for index, incoming in enumerate(_tile_frames(chunks)):
+        if index % hold == 0:
+            held = incoming
+        current = held if held is not None else incoming
         changed = (
             np.ones((GRID_ROWS, GRID_COLS), dtype=bool)
-            if index == 0
-            else (current != tiles[index - 1]).any(axis=(2, 3))
+            if previous is None
+            else (current != previous).any(axis=(2, 3))
         )
-        scene_cut = index == 0 or float(changed.mean()) >= options.scene_cut_ratio
+        previous_source = previous
+        previous = current
+        scene_cut = _is_scene_cut(current, previous_source, changed, index, options)
         keyframe = scene_cut or (index - last_keyframe >= options.keyframe_interval)
 
         if keyframe:
             last_keyframe = index
-            targets = np.ones((GRID_ROWS, GRID_COLS), dtype=bool)
-        else:
-            targets = changed
-            if options.tolerance > 0.0 and targets.any():
-                keep = np.zeros_like(targets)
-                keep[targets] = screen.drift(current, targets) > options.tolerance
-                targets = keep
+        targets, pending = _select_targets(
+            current,
+            previous_source,
+            changed,
+            pending,
+            screen=screen,
+            keyframe=keyframe,
+            options=options,
+        )
 
         updates: list[stream.SlotUpdate] = []
         if targets.any():
             rows, cols = np.nonzero(targets)
             assignment = assigner.assign(current[rows, cols])
-            error_total += float(assignment.error.sum())
-            error_pixels += assignment.error.size * TILE_PX * TILE_PX
+            totals.error_total += float(assignment.error.sum())
+            totals.error_pixels += assignment.error.size * TILE_PX * TILE_PX
             refs = dictionary.intern_batch(assignment.nibbles)
             updates = screen.commit(rows, cols, refs, assignment, force=keyframe)
 
@@ -250,22 +443,23 @@ def encode(clip: npt.NDArray[np.uint8], options: EncodeOptions) -> EncodeResult:
         movie.append(updates, keyframe=keyframe)
         written = movie.payload_size() - before
         if keyframe:
-            keyframe_bytes += written
+            totals.keyframe_bytes += written
         else:
-            delta_bytes += written
+            totals.delta_bytes += written
 
         updates_per_frame[index] = len(updates)
+        totals.displayed_error_total += screen.fidelity(incoming)
+        totals.displayed_frames += 1
         if options.collect_rendered:
             rendered[index] = from_tiles(screen.render)
+        if on_render is not None:
+            on_render(from_tiles(screen.render))
 
     stats = _build_stats(
         movie=movie,
         dictionary=dictionary,
         updates_per_frame=updates_per_frame,
-        keyframe_bytes=keyframe_bytes,
-        delta_bytes=delta_bytes,
-        error_total=error_total,
-        error_pixels=error_pixels,
+        totals=totals,
     )
 
     return EncodeResult(

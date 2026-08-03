@@ -41,14 +41,44 @@ DESCRIPTOR_DIMS: Final = 9
 _KMEANS_ITERATIONS: Final = 24
 _ASSIGN_CHUNK_BYTES: Final = 64 << 20
 
-_OKLAB_GRID: npt.NDArray[np.float32] | None = None
+DEFAULT_CHROMA_WEIGHT: Final = 1.0
+
+_OKLAB_GRIDS: dict[float, npt.NDArray[np.float32]] = {}
 
 
-def oklab_grid() -> npt.NDArray[np.float32]:
-    global _OKLAB_GRID  # noqa: PLW0603
-    if _OKLAB_GRID is None:
-        _OKLAB_GRID = neocolor.build_oklab_grid()
-    return _OKLAB_GRID
+def oklab_grid(chroma_weight: float = DEFAULT_CHROMA_WEIGHT) -> npt.NDArray[np.float32]:
+    """Color index to Oklab, with the chroma axes optionally scaled down.
+
+    Vision resolves luminance far more finely than colour, which is why
+    every broadcast and consumer codec since the 1950s has spent fewer
+    bits on chroma than on luma. Angel Studios leaned on exactly this to
+    fit Resident Evil 2's video into 24 MiB, quartering the horizontal
+    chroma resolution outright.
+
+    There is no separate chroma plane to subsample here, because a tile
+    is a palette index and not a Y/Cb/Cr triple. The equivalent lever is
+    the distance metric every stage already shares: scaling the `a` and
+    `b` axes by the square root of the weight makes a squared distance
+    charge chroma error at `chroma_weight` times the rate of luma error.
+    Palette fitting, palette assignment, redraw decisions, and motion
+    masking all measure distance through this table, so weighting it
+    here moves the whole encoder onto a luma-first metric at once.
+
+    A weight of one reproduces unweighted Oklab.
+    """
+    if chroma_weight <= 0.0:
+        msg = f"chroma weight must be positive, got {chroma_weight}"
+        raise ValueError(msg)
+    cached = _OKLAB_GRIDS.get(chroma_weight)
+    if cached is None:
+        grid = neocolor.build_oklab_grid()
+        if chroma_weight != 1.0:
+            grid = grid * np.array(
+                [1.0, np.sqrt(chroma_weight), np.sqrt(chroma_weight)], dtype=np.float32
+            )
+        cached = grid.astype(np.float32)
+        _OKLAB_GRIDS[chroma_weight] = cached
+    return cached
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +86,7 @@ class PaletteSet:
     colors: npt.NDArray[np.uint16]
     base_bank: int
     descriptors: npt.NDArray[np.float32] | None = None
+    chroma_weight: float = DEFAULT_CHROMA_WEIGHT
 
     def __post_init__(self) -> None:
         if self.colors.ndim != 2 or self.colors.shape[1] != PALETTE_SLOTS:
@@ -113,8 +144,10 @@ def _sqdist(
     return distance
 
 
-def _tile_descriptors(tiles: npt.NDArray[np.uint16]) -> npt.NDArray[np.float32]:
-    grid = oklab_grid()
+def _tile_descriptors(
+    tiles: npt.NDArray[np.uint16], chroma_weight: float = DEFAULT_CHROMA_WEIGHT
+) -> npt.NDArray[np.float32]:
+    grid = oklab_grid(chroma_weight)
     lab = grid[tiles.reshape(tiles.shape[0], TILE_PIXELS)]
     lightness = lab[:, :, 0]
     darkest = lab[np.arange(lab.shape[0]), np.argmin(lightness, axis=1)]
@@ -152,9 +185,12 @@ def _kmeans(
 
 
 def _fit_palette(
-    colors: npt.NDArray[np.uint16], counts: npt.NDArray[np.int64], seed: int
+    colors: npt.NDArray[np.uint16],
+    counts: npt.NDArray[np.int64],
+    seed: int,
+    chroma_weight: float = DEFAULT_CHROMA_WEIGHT,
 ) -> npt.NDArray[np.uint16]:
-    grid = oklab_grid()
+    grid = oklab_grid(chroma_weight)
     if colors.shape[0] <= PALETTE_SLOTS:
         padded = np.resize(colors, PALETTE_SLOTS)
         return padded.astype(np.uint16)
@@ -187,7 +223,12 @@ def _fit_palette(
 
 
 def build_palette_set(
-    tiles: npt.NDArray[np.uint16], *, count: int, base_bank: int, seed: int
+    tiles: npt.NDArray[np.uint16],
+    *,
+    count: int,
+    base_bank: int,
+    seed: int,
+    chroma_weight: float = DEFAULT_CHROMA_WEIGHT,
 ) -> PaletteSet:
     """Cluster a sample of tiles and fit one palette per cluster."""
     if tiles.shape[0] == 0:
@@ -197,7 +238,7 @@ def build_palette_set(
         msg = f"{count} palettes at base bank {base_bank} overflow the {CRAM_BANKS} CRAM banks"
         raise ValueError(msg)
 
-    descriptors = _tile_descriptors(tiles)
+    descriptors = _tile_descriptors(tiles, chroma_weight)
     labels, centroids = _kmeans(descriptors, count, seed)
 
     flat = tiles.reshape(tiles.shape[0], TILE_PIXELS)
@@ -207,9 +248,14 @@ def build_palette_set(
         if members.size == 0:
             members = flat
         colors, counts = np.unique(members.reshape(-1), return_counts=True)
-        palettes[index] = _fit_palette(colors, counts, seed + index)
+        palettes[index] = _fit_palette(colors, counts, seed + index, chroma_weight)
 
-    return PaletteSet(colors=palettes, base_bank=base_bank, descriptors=centroids)
+    return PaletteSet(
+        colors=palettes,
+        base_bank=base_bank,
+        descriptors=centroids,
+        chroma_weight=chroma_weight,
+    )
 
 
 class PaletteAssigner:
@@ -218,7 +264,7 @@ class PaletteAssigner:
     def __init__(self, palette_set: PaletteSet, *, candidates: int = 0) -> None:
         self._palette_set = palette_set
         self._candidates = min(candidates if candidates > 0 else len(palette_set), len(palette_set))
-        grid = oklab_grid()
+        grid = oklab_grid(palette_set.chroma_weight)
         total = len(palette_set)
         self._slot = np.zeros((total, grid.shape[0]), dtype=np.uint8)
         self._error = np.zeros((total, grid.shape[0]), dtype=np.float32)

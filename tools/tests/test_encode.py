@@ -244,3 +244,246 @@ class TestEmptyAssignment:
         )
 
         assert assignment.rendered(palette_set).shape == (0, 16, 16)
+
+
+class TestDictionaryCeiling:
+    def noisy_clip(self, count: int) -> np.ndarray:
+        rng = np.random.default_rng(7)
+        return rng.integers(0, 256, size=(count, HEIGHT, WIDTH, 3), dtype=np.uint8)
+
+    def test_a_full_dictionary_does_not_fail_the_bake(self):
+        result = encode.encode(
+            self.noisy_clip(4), options(palette_count=8, dictionary_capacity=100)
+        )
+
+        assert result.stats.frames == 4
+
+    def test_a_full_dictionary_is_reported(self):
+        result = encode.encode(
+            self.noisy_clip(4), options(palette_count=8, dictionary_capacity=100)
+        )
+
+        assert result.stats.dictionary_full is True
+
+    def test_the_dictionary_never_exceeds_its_capacity(self):
+        result = encode.encode(
+            self.noisy_clip(4), options(palette_count=8, dictionary_capacity=100)
+        )
+
+        assert len(result.dictionary) <= 100
+
+    def test_slots_with_no_tile_keep_showing_the_previous_one(self):
+        result = encode.encode(self.noisy_clip(3), options(palette_count=8, dictionary_capacity=60))
+
+        assert result.updates_per_frame[2] < encode.SLOT_COUNT
+
+    def test_an_unfilled_dictionary_reports_room_left(self):
+        result = encode.encode(flat_clip(3, (40, 90, 160)), options())
+
+        assert result.stats.dictionary_full is False
+
+
+class TestFrameHold:
+    def moving_clip(self, count: int) -> np.ndarray:
+        rng = np.random.default_rng(11)
+        clip = np.zeros((count, HEIGHT, WIDTH, 3), dtype=np.uint8)
+        for index in range(count):
+            clip[index] = rng.integers(0, 256, size=(HEIGHT, WIDTH, 3), dtype=np.uint8)
+        return clip
+
+    def test_holding_frames_keeps_the_frame_count(self):
+        result = encode.encode(self.moving_clip(12), options(frame_hold=3))
+
+        assert result.stats.frames == 12
+
+    def test_holding_frames_shrinks_the_dictionary(self):
+        clip = self.moving_clip(12)
+
+        plain = encode.encode(clip, options())
+        held = encode.encode(clip, options(frame_hold=3))
+
+        assert len(held.dictionary) < len(plain.dictionary)
+
+    def test_a_hold_of_one_changes_nothing(self):
+        clip = self.moving_clip(6)
+
+        assert len(encode.encode(clip, options(frame_hold=1)).dictionary) == len(
+            encode.encode(clip, options()).dictionary
+        )
+
+    def test_held_frames_repeat_the_picture(self):
+        result = encode.encode(self.moving_clip(9), options(frame_hold=3, keyframe_interval=100))
+
+        assert result.updates_per_frame[1] == 0
+        assert result.updates_per_frame[2] == 0
+
+    def test_a_zero_hold_is_treated_as_one(self):
+        clip = self.moving_clip(6)
+
+        assert len(encode.encode(clip, options(frame_hold=0)).dictionary) == len(
+            encode.encode(clip, options(frame_hold=1)).dictionary
+        )
+
+
+class TestMotionMasking:
+    def half_moving(self, count: int) -> np.ndarray:
+        """Left half churns hard, right half holds still."""
+        rng = np.random.default_rng(21)
+        clip = np.zeros((count, HEIGHT, WIDTH, 3), dtype=np.uint8)
+        still = rng.integers(0, 256, size=(HEIGHT, WIDTH // 2, 3), dtype=np.uint8)
+        for index in range(count):
+            clip[index, :, WIDTH // 2 :] = still
+            clip[index, :, : WIDTH // 2] = rng.integers(
+                0, 256, size=(HEIGHT, WIDTH // 2, 3), dtype=np.uint8
+            )
+        return clip
+
+    def settings(self, **extra):
+        base = {"keyframe_interval": 1000, "scene_cut_ratio": 1.1, "tolerance": 0.0005}
+        base.update(extra)
+        return options(**base)
+
+    def test_masking_off_reproduces_the_flat_threshold(self):
+        clip = self.half_moving(6)
+
+        flat = encode.encode(clip, self.settings())
+        masked = encode.encode(clip, self.settings(motion_masking=0.0))
+
+        assert list(flat.updates_per_frame) == list(masked.updates_per_frame)
+
+    def test_masking_shrinks_the_dictionary_on_moving_content(self):
+        clip = self.half_moving(6)
+
+        flat = encode.encode(clip, self.settings())
+        masked = encode.encode(clip, self.settings(motion_masking=20.0))
+
+        assert len(masked.dictionary) < len(flat.dictionary)
+
+    def test_masking_reduces_the_slot_updates(self):
+        clip = self.half_moving(6)
+
+        flat = encode.encode(clip, self.settings())
+        masked = encode.encode(clip, self.settings(motion_masking=20.0))
+
+        assert masked.updates_per_frame[3] < flat.updates_per_frame[3]
+
+    def test_an_error_hidden_by_motion_is_repaired_once_motion_stops(self):
+        clip = flat_clip(4, (100, 100, 100))
+        clip[1:, 0:16, 0:16] = (200, 40, 40)
+
+        masked = encode.encode(clip, self.settings(motion_masking=20.0))
+
+        assert masked.updates_per_frame[1] == 0
+        assert masked.updates_per_frame[2] == 1
+
+    def test_a_still_region_is_never_left_wrong(self):
+        clip = flat_clip(6, (100, 100, 100))
+        clip[1:, 0:16, 0:16] = (200, 40, 40)
+
+        masked = encode.encode(clip, self.settings(motion_masking=20.0))
+
+        assert np.array_equal(masked.rendered[5], masked.rendered[4])
+        assert int(masked.updates_per_frame[3:].sum()) == 0
+
+    def test_a_bigger_masking_factor_saves_more(self):
+        clip = self.half_moving(6)
+
+        light = encode.encode(clip, self.settings(motion_masking=5.0))
+        heavy = encode.encode(clip, self.settings(motion_masking=40.0))
+
+        assert len(heavy.dictionary) <= len(light.dictionary)
+
+
+class TestSceneCutFloor:
+    def gentle_drift(self, count: int) -> np.ndarray:
+        """Every slot changes every frame, by one shade."""
+        clip = np.zeros((count, HEIGHT, WIDTH, 3), dtype=np.uint8)
+        for index in range(count):
+            clip[index, :, :] = (100 + 8 * index, 100, 100)
+        return clip
+
+    def test_a_shade_everywhere_is_not_a_scene_cut(self):
+        clip = self.gentle_drift(6)
+
+        result = encode.encode(clip, options(keyframe_interval=100, scene_cut_floor=0.01))
+
+        assert list(result.stream.keyframes()) == [0]
+
+    def test_a_floor_of_zero_reads_the_same_drift_as_a_cut(self):
+        clip = self.gentle_drift(6)
+
+        result = encode.encode(clip, options(keyframe_interval=100, scene_cut_floor=0.0))
+
+        assert len(result.stream.keyframes()) > 1
+
+    def test_a_real_jump_still_forces_a_keyframe(self):
+        clip = np.concatenate([flat_clip(3, (200, 0, 0)), flat_clip(3, (0, 200, 0))])
+
+        result = encode.encode(clip, options(keyframe_interval=100, scene_cut_floor=0.01))
+
+        assert 3 in list(result.stream.keyframes())
+
+    def test_the_floor_cuts_the_dictionary_on_drifting_content(self):
+        clip = self.gentle_drift(6)
+
+        counted = encode.encode(clip, options(keyframe_interval=100, scene_cut_floor=0.0))
+        measured = encode.encode(clip, options(keyframe_interval=100, scene_cut_floor=0.01))
+
+        assert len(measured.dictionary) < len(counted.dictionary)
+
+
+class TestChromaWeight:
+    def test_the_grid_scales_only_the_chroma_axes(self):
+        plain = palettes.oklab_grid(1.0)
+        weighted = palettes.oklab_grid(0.25)
+
+        assert np.allclose(weighted[:, 0], plain[:, 0])
+        assert np.allclose(weighted[:, 1:], plain[:, 1:] * 0.5)
+
+    def test_a_weight_of_one_is_the_unweighted_grid(self):
+        assert palettes.oklab_grid(1.0) is palettes.oklab_grid()
+
+    def test_a_non_positive_weight_is_rejected(self):
+        with pytest.raises(ValueError, match="positive"):
+            palettes.oklab_grid(0.0)
+
+    def test_cheaper_chroma_never_grows_the_dictionary(self):
+        rng = np.random.default_rng(7)
+        clip = rng.integers(0, 256, size=(6, HEIGHT, WIDTH, 3), dtype=np.uint8)
+
+        plain = encode.encode(clip, options(chroma_weight=1.0))
+        cheap = encode.encode(clip, options(chroma_weight=0.1))
+
+        assert len(cheap.dictionary) <= len(plain.dictionary)
+
+
+class TestDisplayedError:
+    def drifting(self, count: int) -> np.ndarray:
+        clip = np.zeros((count, HEIGHT, WIDTH, 3), dtype=np.uint8)
+        for index in range(count):
+            clip[index, :, :] = (100, 100, 100)
+            clip[index, 0:16, 0:16] = (100 + 12 * index, 100, 100)
+        return clip
+
+    def test_skipping_work_is_reported_as_worse_not_better(self):
+        clip = self.drifting(8)
+
+        keen = encode.encode(clip, options(keyframe_interval=1000, tolerance=0.0))
+        lazy = encode.encode(clip, options(keyframe_interval=1000, tolerance=0.05))
+
+        assert lazy.stats.displayed_error > keen.stats.displayed_error
+
+    def test_holding_a_frame_is_charged_against_the_true_source(self):
+        clip = self.drifting(8)
+
+        live = encode.encode(clip, options(keyframe_interval=1000, frame_hold=1))
+        held = encode.encode(clip, options(keyframe_interval=1000, frame_hold=4))
+
+        assert held.stats.displayed_error > live.stats.displayed_error
+
+    def test_an_exact_reproduction_reports_no_error(self):
+        clip = flat_clip(4, (128, 64, 32))
+
+        result = encode.encode(clip, options())
+
+        assert result.stats.displayed_error == pytest.approx(0.0, abs=1e-6)

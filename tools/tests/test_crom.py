@@ -152,3 +152,17 @@ class TestPowerOfTwoPadding:
 
     def test_zero_tiles_still_produce_the_minimum_rom(self):
         assert crom.rom_size_for(0) == 1 << 20
+
+
+class TestUnpacking:
+    def test_unpacking_recovers_the_original_tiles(self):
+        tiles = random_tiles(32, seed=71)
+
+        c1, c2 = crom.pack_tiles(tiles)
+
+        assert np.array_equal(crom.unpack_tiles(c1, c2), tiles)
+
+    def test_unpacking_an_empty_batch_yields_no_tiles(self):
+        c1, c2 = crom.pack_tiles(np.zeros((0, 16, 16), dtype=np.uint8))
+
+        assert crom.unpack_tiles(c1, c2).shape == (0, 16, 16)

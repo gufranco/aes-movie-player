@@ -1,28 +1,39 @@
-"""Global tile dictionary with mirror deduplication.
+"""Global tile dictionary, sized for a cart filled to the C-ROM ceiling.
 
-Every distinct 16x16 pattern the movie needs is stored once and
-addressed by a 20-bit tile number. The LSPC applies horizontal and
-vertical flip per tile from the SCB1 attribute word, so a pattern and
-its three mirrors share one C-ROM entry. Registering all four
-orientations of a new tile at insert time makes every later lookup a
-single dictionary hit.
+A full cart holds 1,048,576 tiles, the whole span of the 20-bit tile
+number, so this has to stay compact at a million entries. Tiles are kept
+in their packed C-ROM form, 64 bytes in each ROM half, and the lookup is
+keyed by a 128-bit digest of those bytes rather than by the bytes
+themselves. Storing full keys would cost more than the tile data.
 
-The dictionary key is the palette-index pattern alone, not the pattern
-plus its palette. The palette lives in the attribute word, so two slots
-showing the same shape under different palettes cost one tile between
-them.
+Flip deduplication is off by default. It was measured on real footage at
+67 saved tiles out of 81,044, under a tenth of a percent, because exact
+16x16 mirrors essentially do not occur in photographed or rendered
+material. Leaving it on would quadruple the lookup for that.
+
+When the dictionary fills, `intern_batch` reports no reference for
+further new tiles rather than raising. A movie longer than the cart can
+hold should degrade by leaving those slots showing their previous tile,
+not by failing the bake outright.
 """
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Final
 
 import numpy as np
 import numpy.typing as npt
 
+from aesmovie import crom
+
 TILE_PX: Final = 16
 MAX_TILES: Final = 1 << 20
+DIGEST_BYTES: Final = 16
+_HFLIP: Final = 1
+_VFLIP: Final = 2
+_INDEX_SHIFT: Final = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,60 +44,110 @@ class TileRef:
 
 
 class TileDictionary:
-    """Interns 16x16 nibble tiles, collapsing mirrored duplicates."""
+    """Interns packed 16x16 nibble tiles, optionally collapsing mirrors."""
 
-    def __init__(self, *, allow_flip: bool = True) -> None:
+    def __init__(self, *, allow_flip: bool = False, capacity: int = MAX_TILES) -> None:
         self._allow_flip = allow_flip
-        self._entries: list[npt.NDArray[np.uint8] | None] = []
-        self._lookup: dict[bytes, TileRef] = {}
+        self.capacity = min(capacity, MAX_TILES)
+        self._count = 0
+        self._first = bytearray()
+        self._second = bytearray()
+        self._lookup: dict[bytes, int] = {}
 
     def __len__(self) -> int:
-        return len(self._entries)
+        return self._count
 
-    def tiles(self) -> npt.NDArray[np.uint8]:
-        """The stored patterns in tile-number order."""
-        if not self._entries:
-            return np.zeros((0, TILE_PX, TILE_PX), dtype=np.uint8)
-        return np.stack([entry for entry in self._entries if entry is not None])
+    def is_full(self) -> bool:
+        """True once the tile number has no room left."""
+        return self._count >= self.capacity
+
+    def _digest(self, first: bytes, second: bytes) -> bytes:
+        return hashlib.blake2b(first + second, digest_size=DIGEST_BYTES).digest()
+
+    def _reference(self, packed: int) -> TileRef:
+        return TileRef(
+            index=packed >> _INDEX_SHIFT,
+            hflip=bool(packed & _HFLIP),
+            vflip=bool(packed & _VFLIP),
+        )
+
+    def intern_batch(self, tiles: npt.NDArray[np.uint8]) -> list[TileRef | None]:
+        """Intern a batch of patterns, packing them in one pass."""
+        if tiles.shape[0] == 0:
+            return []
+        first, second = crom.pack_tiles(tiles)
+        mirrors = self._mirror_bytes(tiles) if self._allow_flip else None
+
+        refs: list[TileRef | None] = []
+        for position in range(tiles.shape[0]):
+            head = first[position].tobytes()
+            tail = second[position].tobytes()
+            key = self._digest(head, tail)
+            existing = self._lookup.get(key)
+            if existing is not None:
+                refs.append(self._reference(existing))
+                continue
+            if self.is_full():
+                refs.append(None)
+                continue
+
+            index = self._count
+            self._first += head
+            self._second += tail
+            self._count += 1
+            self._lookup[key] = index << _INDEX_SHIFT
+            if mirrors is not None:
+                self._register_mirrors(mirrors, position, index)
+            refs.append(TileRef(index=index, hflip=False, vflip=False))
+        return refs
 
     def intern(self, tile: npt.NDArray[np.uint8]) -> TileRef:
-        """Return the reference for a pattern, adding it when new."""
+        """Intern one pattern, rejecting anything the packer would reject."""
         if tile.shape != (TILE_PX, TILE_PX):
             msg = f"tile must be 16x16, got shape {tile.shape}"
             raise ValueError(msg)
-        if tile.size and int(tile.max()) > 0x0F:
-            msg = "tile pixels must be 4-bit palette indices in the range 0 to 15"
+        reference = self.intern_batch(tile[None])[0]
+        if reference is None:
+            msg = f"dictionary is full at {self.capacity} tiles"
             raise ValueError(msg)
+        return reference
 
-        tile = np.ascontiguousarray(tile, dtype=np.uint8)
-        key = tile.tobytes()
-        existing = self._lookup.get(key)
-        if existing is not None:
-            return existing
-
-        index = len(self._entries)
-        if index >= MAX_TILES:
-            msg = f"dictionary exceeds the 20-bit tile number limit of {MAX_TILES} tiles"
-            raise ValueError(msg)
-
-        self._entries.append(tile)
-        ref = TileRef(index=index, hflip=False, vflip=False)
-        self._lookup[key] = ref
-        if self._allow_flip:
-            self._register_mirrors(tile, index)
-        return ref
-
-    def intern_batch(self, tiles: npt.NDArray[np.uint8]) -> list[TileRef]:
-        """Intern a batch of patterns in order."""
-        return [self.intern(tiles[i]) for i in range(tiles.shape[0])]
-
-    def _register_mirrors(self, tile: npt.NDArray[np.uint8], index: int) -> None:
+    def _mirror_bytes(
+        self, tiles: npt.NDArray[np.uint8]
+    ) -> list[tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8], int]]:
         variants = (
-            (tile[:, ::-1], True, False),
-            (tile[::-1, :], False, True),
-            (tile[::-1, ::-1], True, True),
+            (np.ascontiguousarray(tiles[:, :, ::-1]), _HFLIP),
+            (np.ascontiguousarray(tiles[:, ::-1, :]), _VFLIP),
+            (np.ascontiguousarray(tiles[:, ::-1, ::-1]), _HFLIP | _VFLIP),
         )
-        for variant, hflip, vflip in variants:
-            key = np.ascontiguousarray(variant).tobytes()
-            if key not in self._lookup:
-                self._lookup[key] = TileRef(index=index, hflip=hflip, vflip=vflip)
+        return [(*crom.pack_tiles(variant), flags) for variant, flags in variants]
+
+    def _register_mirrors(
+        self,
+        mirrors: list[tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8], int]],
+        position: int,
+        index: int,
+    ) -> None:
+        for head, tail, flags in mirrors:
+            key = self._digest(head[position].tobytes(), tail[position].tobytes())
+            self._lookup.setdefault(key, (index << _INDEX_SHIFT) | flags)
+
+    def rom_images(self, *, pad_to: int | None = None) -> tuple[bytes, bytes]:
+        """The two C-ROM halves, padded to their final size."""
+        target = crom.rom_size_for(self._count) if pad_to is None else pad_to
+        payload = self._count * crom.TILE_BYTES_PER_ROM
+        if target < payload:
+            msg = f"pad_to {target} is smaller than the {payload} byte payload"
+            raise ValueError(msg)
+        return (
+            bytes(self._first).ljust(target, b"\x00"),
+            bytes(self._second).ljust(target, b"\x00"),
+        )
+
+    def tiles(self) -> npt.NDArray[np.uint8]:
+        """Unpack the stored patterns, for verification rather than for the ROM."""
+        if self._count == 0:
+            return np.zeros((0, TILE_PX, TILE_PX), dtype=np.uint8)
+        first = np.frombuffer(bytes(self._first), dtype=np.uint8).reshape(self._count, -1)
+        second = np.frombuffer(bytes(self._second), dtype=np.uint8).reshape(self._count, -1)
+        return crom.unpack_tiles(first, second)

@@ -275,3 +275,81 @@ class TestDenoise:
             return float(np.abs(np.diff(clip.astype(np.int16), axis=0)).mean())
 
         assert churn(cleaned) < churn(plain)
+
+
+class TestStreaming:
+    def test_streaming_yields_every_frame(self, synthetic_clip):
+        chunks = list(frames.stream(synthetic_clip, start=0.0, duration=0.5, chunk_frames=8))
+
+        assert sum(len(c) for c in chunks) == frames.frame_count(seconds=0.5)
+
+    def test_streamed_chunks_have_the_target_geometry(self, synthetic_clip):
+        for chunk in frames.stream(synthetic_clip, start=0.0, duration=0.3, chunk_frames=8):
+            assert chunk.shape[1:] == (224, 320, 3)
+
+    def test_streaming_matches_a_whole_clip_decode(self, synthetic_clip):
+        whole = frames.decode(synthetic_clip, start=0.0, duration=0.3)
+
+        streamed = np.concatenate(
+            list(frames.stream(synthetic_clip, start=0.0, duration=0.3, chunk_frames=5))
+        )
+
+        assert np.array_equal(streamed, whole)
+
+    def test_chunks_respect_the_requested_size(self, synthetic_clip):
+        chunks = list(frames.stream(synthetic_clip, start=0.0, duration=0.5, chunk_frames=8))
+
+        assert all(len(c) <= 8 for c in chunks)
+
+    def test_streaming_honours_denoise(self, synthetic_clip):
+        plain = np.concatenate(list(frames.stream(synthetic_clip, start=0.0, duration=0.2)))
+        cleaned = np.concatenate(
+            list(frames.stream(synthetic_clip, start=0.0, duration=0.2, denoise=2.0))
+        )
+
+        assert not np.array_equal(plain, cleaned)
+
+    def test_sampling_returns_evenly_spaced_frames(self, synthetic_clip):
+        sample = frames.sample(synthetic_clip, start=0.0, duration=0.5, stride=4)
+
+        assert len(sample) == len(range(0, frames.frame_count(seconds=0.5), 4))
+
+    def test_a_sample_matches_the_strided_whole_clip(self, synthetic_clip):
+        whole = frames.decode(synthetic_clip, start=0.0, duration=0.3)
+
+        sample = frames.sample(synthetic_clip, start=0.0, duration=0.3, stride=3)
+
+        assert np.array_equal(sample, whole[::3])
+
+
+class TestMotionBlur:
+    def test_no_blur_by_default(self):
+        geometry = frames.plan_geometry(1280, 720, 320, 224, fit="fill")
+
+        assert "tmix" not in frames.build_filter(geometry)
+
+    def test_a_single_frame_blur_is_a_no_op(self):
+        geometry = frames.plan_geometry(1280, 720, 320, 224, fit="fill")
+
+        assert "tmix" not in frames.build_filter(geometry, motion_blur=1)
+
+    def test_blur_averages_the_requested_frame_count(self):
+        geometry = frames.plan_geometry(1280, 720, 320, 224, fit="fill")
+
+        assert "tmix=frames=3" in frames.build_filter(geometry, motion_blur=3)
+
+    def test_blur_runs_before_the_frame_rate_resample(self):
+        geometry = frames.plan_geometry(1280, 720, 320, 224, fit="fill")
+
+        chain = frames.build_filter(geometry, motion_blur=2)
+
+        assert chain.index("tmix") < chain.index("fps=")
+
+    def test_blur_smooths_frame_to_frame_change(self, synthetic_clip):
+        plain = frames.decode(synthetic_clip, start=0.0, duration=0.4)
+        blurred = frames.decode(synthetic_clip, start=0.0, duration=0.4, motion_blur=3)
+
+        def churn(clip):
+            return float(np.abs(np.diff(clip.astype(np.int16), axis=0)).mean())
+
+        assert churn(blurred) < churn(plain)

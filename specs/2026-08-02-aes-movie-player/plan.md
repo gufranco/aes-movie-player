@@ -281,6 +281,77 @@ geolith masks the program-ROM bank register with a mask derived from the ROM siz
 
 Nothing has run on a console. The colour model follows the board's resistor ladder rather than a linear scale, so output should be close, but the exact analog result is unverified. Timing is modelled, not measured: the player fits its writes in vblank in both emulators, and the same code takes the same cycles on a 12 MHz 68000, but that is inference.
 
+## Perceptual budget, 2026-08-03
+
+The goal is the longest runtime whose losses a viewer does not notice, so
+every lever below is judged against a fidelity number the encoder cannot
+flatter. `mean_error` could not do that job: it averages the palette error
+of tiles that were written, so it *improves* when the encoder skips more
+work. `displayed_error` replaces it, measuring unweighted Oklab error over
+every slot of every frame against the true source frame for that refresh,
+never against a held copy. Raising the tolerance now correctly raises it.
+
+### Scene-cut detection was the dominant defect
+
+Scene cuts force a keyframe, and a keyframe rewrites all 280 slots and
+interns whatever tiles those slots need. The test was the fraction of
+slots that differ at all from the previous frame, against a 0.90 ratio.
+On photographed material grain and gentle camera motion perturb nearly
+every slot by a shade every frame, so that test fired on **22% of all
+frames**, a keyframe every 4.5 frames. Keyframes, not the delta path,
+were creating most of the dictionary, which is why both `--tolerance`
+and `--motion-masking` looked inert: whatever a delta declined to draw,
+the next keyframe drew anyway.
+
+`--scene-cut-floor` fixes it by counting only slots whose source moved
+further than a floor, so gradual motion stays on the delta path. Measured
+on 20 s of real footage: 261 keyframes fall to 16, tiles fall 22%, and
+`displayed_error` rises 6%. This is close to a free win and is on by
+default.
+
+### Lever measurements, 20 s of real footage
+
+Runtime is the C-ROM ceiling of 128 MiB divided by the measured tile rate.
+
+| Configuration | Tiles | Max runtime | displayed_error x1e4 |
+|---|---|---|---|
+| Count-based cuts, the old default | 94,953 | 3.7 min | 5.36 |
+| Magnitude cuts | 74,362 | 4.7 min | 5.71 |
+| + chroma weight 0.25 | 57,236 | 6.1 min | 7.47 |
+| + frame hold 4, no blend | 39,644 | 8.8 min | 23.33 |
+| + frame hold 4, blend width 4 | 41,077 | 8.5 min | 11.41 |
+| + frame hold 4, blend width 8 | 41,989 | 8.3 min | 9.11 |
+
+Blending is the highest-value lever measured. At a fixed hold of 4 it
+costs about 6% more tiles and cuts the error from 23.33 to 9.11, because
+a blended frame carries less high-frequency detail and so reuses more
+dictionary entries, paying for most of itself. This is the bake-time
+equivalent of the RDP cross-fade Angel Studios ran at playback time.
+
+Frame hold must be chosen against the source frame rate, not in the
+abstract. A 24 fps source arriving at the 59.185 Hz refresh already
+repeats each frame about 2.47 times, so a hold of 2 drops no distinct
+source frame, saves no tiles, and only misaligns the cadence. It measured
+strictly worse than a hold of 1. Only a hold of 3 or more discards real
+frames.
+
+### Motion masking is a dead end, kept at zero
+
+Raising the per-slot error budget where the picture moves is sound in a
+codec with residuals, and it is what Angel Studios did by degrading
+backgrounds in busy scenes. It does not work here. Measured across
+masking factors from 20 to 3000, the tile count did not move by one
+entry while `displayed_error` went from 7.47 to 30.88.
+
+The threshold does rise, and slots are correctly skipped. They are simply
+re-tested every frame and drawn as soon as their motion stops, per the
+repair rule that stops a masked error outliving the movement that hid it.
+Because a correction here can only point a slot at a dictionary tile, the
+deferred tile gets interned regardless, just later and against a picture
+that has drifted further. The mechanism costs fidelity and buys nothing.
+It stays in the encoder at a default of zero, documented as measured
+rather than removed, so the next session does not re-derive it.
+
 ## Milestones
 
 Spike first, then build outward. Each milestone is verifiable in geolith.

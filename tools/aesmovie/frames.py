@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from collections.abc import Iterator
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -170,7 +171,12 @@ def plan_geometry(
     )
 
 
-def build_filter(geometry: Geometry, fps: Fraction = VBLANK_FPS, denoise: float = 0.0) -> str:
+def build_filter(
+    geometry: Geometry,
+    fps: Fraction = VBLANK_FPS,
+    denoise: float = 0.0,
+    motion_blur: int = 0,
+) -> str:
     """Build the ffmpeg filter chain for a planned geometry.
 
     Scaling runs before the frame-rate resample so upsampling to the
@@ -186,6 +192,8 @@ def build_filter(geometry: Geometry, fps: Fraction = VBLANK_FPS, denoise: float 
     ]
     if denoise > 0.0:
         stages.append(Denoise().scaled(denoise).to_filter())
+    if motion_blur > 1:
+        stages.append(f"tmix=frames={motion_blur}")
     if geometry.pad_top:
         stages.append(f"pad={target_w}:{target_h}:0:{geometry.pad_top}:black")
     stages.append(f"fps={fps.numerator}/{fps.denominator}")
@@ -202,6 +210,7 @@ def decode(
     target_width: int = TARGET_WIDTH,
     target_height: int = TARGET_HEIGHT,
     denoise: float = 0.0,
+    motion_blur: int = 0,
 ) -> npt.NDArray[np.uint8]:
     """Decode a clip window into vblank-rate RGB frames."""
     info = probe(path)
@@ -219,7 +228,7 @@ def decode(
             "-t",
             f"{duration:.6f}",
             "-vf",
-            build_filter(geometry, denoise=denoise),
+            build_filter(geometry, denoise=denoise, motion_blur=motion_blur),
             "-an",
             "-sn",
             "-f",
@@ -246,3 +255,122 @@ def decode(
         raise RuntimeError(msg)
     tail = np.repeat(clip[-1:], wanted - produced, axis=0)
     return np.concatenate([clip, tail], axis=0)
+
+
+DEFAULT_CHUNK_FRAMES: Final = 64
+
+
+def _decode_process(
+    path: Path,
+    *,
+    start: float,
+    duration: float,
+    fit: FitMode,
+    target_width: int,
+    target_height: int,
+    denoise: float,
+    motion_blur: int,
+) -> subprocess.Popen[bytes]:
+    info = probe(path)
+    geometry = plan_geometry(info.width, info.height, target_width, target_height, fit=fit)
+    return subprocess.Popen(
+        [
+            _require_tool("ffmpeg"),
+            "-v",
+            "error",
+            "-ss",
+            f"{start:.6f}",
+            "-i",
+            str(path),
+            "-t",
+            f"{duration:.6f}",
+            "-vf",
+            build_filter(geometry, denoise=denoise, motion_blur=motion_blur),
+            "-an",
+            "-sn",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def stream(
+    path: Path,
+    *,
+    start: float,
+    duration: float,
+    fit: FitMode = "fill",
+    target_width: int = TARGET_WIDTH,
+    target_height: int = TARGET_HEIGHT,
+    denoise: float = 0.0,
+    motion_blur: int = 0,
+    chunk_frames: int = DEFAULT_CHUNK_FRAMES,
+) -> Iterator[npt.NDArray[np.uint8]]:
+    """Yield decoded frames in chunks instead of all at once.
+
+    A cart filled to the 128 MiB character-ROM ceiling is about four and
+    a half minutes of video, which is roughly 15,600 frames. Holding
+    those as RGB would be over three gigabytes before the encoder has
+    allocated anything, so a full-capacity bake is only possible if the
+    frames arrive a chunk at a time.
+    """
+    stride = target_width * target_height * 3
+    wanted = frame_count(seconds=duration)
+    process = _decode_process(
+        path,
+        start=start,
+        duration=duration,
+        fit=fit,
+        target_width=target_width,
+        target_height=target_height,
+        denoise=denoise,
+        motion_blur=motion_blur,
+    )
+    assert process.stdout is not None
+    produced = 0
+    try:
+        while produced < wanted:
+            batch = min(chunk_frames, wanted - produced)
+            payload = process.stdout.read(batch * stride)
+            if not payload:
+                break
+            whole = len(payload) // stride
+            if whole == 0:
+                break
+            yield np.frombuffer(payload[: whole * stride], dtype=np.uint8).reshape(
+                whole, target_height, target_width, 3
+            )
+            produced += whole
+    finally:
+        process.stdout.close()
+        process.wait()
+
+
+def sample(
+    path: Path,
+    *,
+    start: float,
+    duration: float,
+    stride: int,
+    fit: FitMode = "fill",
+    denoise: float = 0.0,
+    motion_blur: int = 0,
+) -> npt.NDArray[np.uint8]:
+    """Every `stride`-th frame, for fitting the palette set."""
+    kept: list[npt.NDArray[np.uint8]] = []
+    index = 0
+    for chunk in stream(
+        path, start=start, duration=duration, fit=fit, denoise=denoise, motion_blur=motion_blur
+    ):
+        offsets = [i for i in range(len(chunk)) if (index + i) % stride == 0]
+        if offsets:
+            kept.append(chunk[offsets])
+        index += len(chunk)
+    if not kept:
+        return np.zeros((0, TARGET_HEIGHT, TARGET_WIDTH, 3), dtype=np.uint8)
+    return np.concatenate(kept)

@@ -23,12 +23,13 @@ from typing import Any, Final
 import numpy as np
 import numpy.typing as npt
 
-from aesmovie import adpcmb, crom, encode, fixtiles, frames, neocolor
+from aesmovie import adpcmb, encode, fixtiles, frames, neocolor
 
 SECONDS_PER_MINUTE: Final = 60.0
 CROM_BANK_BYTES: Final = 128 << 20
 ADPCM_B_BYTES: Final = 16 << 20
 V_ROM_MIN_BYTES: Final = 1 << 19
+MAX_SAMPLE_TILES: Final = 200_000
 FIX_PALETTE_BANK: Final = 1
 S_ROM_BYTES: Final = 131072
 
@@ -155,15 +156,20 @@ class BakeRequest:
     fit: frames.FitMode = "fill"
     palette_count: int = 240
     base_bank: int = 16
-    keyframe_interval: int = 45
-    tolerance: float = 0.0
-    scene_cut_ratio: float = 0.55
+    keyframe_interval: int = 90
+    tolerance: float = 0.0005
+    scene_cut_ratio: float = 0.90
     candidates: int = 12
-    allow_flip: bool = True
+    allow_flip: bool = False
     sample_stride: int = 8
     seed: int = 0
     preview: Path | None = None
     denoise: float = 0.0
+    frame_hold: int = 1
+    motion_blur: int = 0
+    motion_masking: float = 0.0
+    chroma_weight: float = 1.0
+    scene_cut_floor: float = 0.01
     audio_rate_hz: float = 22050.0
     audio: bool = True
 
@@ -186,7 +192,13 @@ class BakeOutcome:
             "frames": stats.frames,
             "seconds": round(seconds, 3),
             "denoise": self.request.denoise,
+            "frame_hold": self.request.frame_hold,
+            "motion_blur": self.request.motion_blur,
+            "motion_masking": self.request.motion_masking,
+            "chroma_weight": self.request.chroma_weight,
+            "scene_cut_floor": self.request.scene_cut_floor,
             "tile_count": stats.tile_count,
+            "dictionary_full": stats.dictionary_full,
             "crom_payload_bytes": stats.crom_payload_bytes,
             "crom_rom_bytes": stats.crom_rom_bytes,
             "stream_bytes": stats.stream_bytes,
@@ -199,10 +211,28 @@ class BakeOutcome:
             "max_updates": stats.max_updates,
             "mean_updates": round(stats.mean_updates, 2),
             "mean_error": stats.mean_error,
+            "displayed_error": stats.displayed_error,
             "projected_crom_bytes_per_minute": round(crom_per_minute),
             "projected_stream_bytes_per_minute": round(stream_per_minute),
             "projected_minutes_per_crom_bank": round(CROM_BANK_BYTES / crom_per_minute, 2),
         }
+
+
+def _thin_sample(tiles: np.ndarray, seed: int) -> np.ndarray:
+    """Cap how many tiles the palette fit sees.
+
+    Fitting the palette set materializes an Oklab triple per pixel of
+    every sample tile. On a full-length clip the strided sample runs to
+    over half a million tiles, which is gigabytes of float before the
+    encoder has started. A capped random subset picks the same palettes
+    for a fraction of the memory.
+    """
+    if tiles.shape[0] <= MAX_SAMPLE_TILES:
+        return tiles
+    rng = np.random.default_rng(seed)
+    keep = rng.choice(tiles.shape[0], MAX_SAMPLE_TILES, replace=False)
+    keep.sort()
+    return tiles[keep]
 
 
 def audio_pages_per_frame(delta_n: int) -> Fraction:
@@ -301,6 +331,52 @@ def _write_audio_params(build_dir: Path, encoded: adpcmb.EncodedAudio) -> Path:
     return path
 
 
+class _PreviewWriter:
+    """Feeds rendered frames to ffmpeg as they are produced.
+
+    A full-capacity bake renders more frames than fit in memory, so the
+    preview cannot be assembled at the end. Frames go down the pipe as
+    the encoder finishes them.
+    """
+
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rate = frames.VBLANK_FPS
+        self._process = subprocess.Popen(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgb24",
+                "-s",
+                f"{encode.FRAME_WIDTH}x{encode.FRAME_HEIGHT}",
+                "-r",
+                f"{rate.numerator}/{rate.denominator}",
+                "-i",
+                "-",
+                *_preview_codec(path),
+                str(path),
+            ],
+            stdin=subprocess.PIPE,
+        )
+        self._path = path
+
+    def write(self, frame: np.ndarray) -> None:
+        assert self._process.stdin is not None
+        self._process.stdin.write(neocolor.color_index_to_rgb(frame).astype(np.uint8).tobytes())
+
+    def close(self) -> None:
+        assert self._process.stdin is not None
+        self._process.stdin.close()
+        if self._process.wait() != 0:
+            msg = f"ffmpeg failed to write the preview at {self._path}"
+            raise RuntimeError(msg)
+
+
 def _write_preview(path: Path, rendered: np.ndarray) -> None:
     if rendered.shape[0] == 0:
         msg = "preview requested but no rendered frames were collected"
@@ -339,15 +415,32 @@ def _write_preview(path: Path, rendered: np.ndarray) -> None:
 
 def run(request: BakeRequest) -> BakeOutcome:
     """Decode, encode, and write every cart artifact."""
-    clip = frames.decode(
+    sample_clip = frames.sample(
+        request.source,
+        start=request.start,
+        duration=request.duration,
+        stride=max(1, request.sample_stride),
+        fit=request.fit,
+        denoise=request.denoise,
+        motion_blur=request.motion_blur,
+    )
+    sample_tiles = encode.to_tiles(neocolor.rgb_to_color_index(sample_clip)).reshape(
+        -1, encode.TILE_PX, encode.TILE_PX
+    )
+    del sample_clip
+    sample_tiles = _thin_sample(sample_tiles, request.seed)
+
+    preview = _PreviewWriter(request.preview) if request.preview else None
+    chunks = frames.stream(
         request.source,
         start=request.start,
         duration=request.duration,
         fit=request.fit,
         denoise=request.denoise,
+        motion_blur=request.motion_blur,
     )
-    result = encode.encode(
-        clip,
+    result = encode.encode_stream(
+        chunks,
         encode.EncodeOptions(
             palette_count=request.palette_count,
             base_bank=request.base_bank,
@@ -358,13 +451,22 @@ def run(request: BakeRequest) -> BakeOutcome:
             allow_flip=request.allow_flip,
             sample_stride=request.sample_stride,
             seed=request.seed,
-            collect_rendered=request.preview is not None,
+            frame_hold=request.frame_hold,
+            motion_masking=request.motion_masking,
+            chroma_weight=request.chroma_weight,
+            scene_cut_floor=request.scene_cut_floor,
+            collect_rendered=False,
         ),
+        sample_tiles=sample_tiles,
+        total_frames=frames.frame_count(seconds=request.duration),
+        on_render=preview.write if preview else None,
     )
+    if preview:
+        preview.close()
 
     baked = request.build_dir / "baked"
     baked.mkdir(parents=True, exist_ok=True)
-    c1, c2 = crom.build_rom_images(result.dictionary.tiles())
+    c1, c2 = result.dictionary.rom_images()
     payload = {
         "c1": (baked / "c1.bin", c1),
         "c2": (baked / "c2.bin", c2),
@@ -402,7 +504,6 @@ def run(request: BakeRequest) -> BakeOutcome:
     artifacts["header"] = header
 
     if request.preview is not None:
-        _write_preview(request.preview, result.rendered)
         artifacts["preview"] = request.preview
 
     return BakeOutcome(
@@ -418,13 +519,18 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--build-dir", type=Path, default=Path("build"))
     parser.add_argument("--fit", choices=("fill", "letterbox"), default="fill")
     parser.add_argument("--denoise", type=float, default=0.0)
+    parser.add_argument("--frame-hold", type=int, default=1)
+    parser.add_argument("--motion-blur", type=int, default=0)
+    parser.add_argument("--motion-masking", type=float, default=0.0)
+    parser.add_argument("--chroma-weight", type=float, default=1.0)
+    parser.add_argument("--scene-cut-floor", type=float, default=0.01)
     parser.add_argument("--palette-count", type=int, default=240)
     parser.add_argument("--base-bank", type=int, default=16)
-    parser.add_argument("--keyframe-interval", type=int, default=45)
-    parser.add_argument("--tolerance", type=float, default=0.0)
-    parser.add_argument("--scene-cut-ratio", type=float, default=0.55)
+    parser.add_argument("--keyframe-interval", type=int, default=90)
+    parser.add_argument("--tolerance", type=float, default=0.0005)
+    parser.add_argument("--scene-cut-ratio", type=float, default=0.90)
     parser.add_argument("--candidates", type=int, default=12)
-    parser.add_argument("--no-flip", action="store_true")
+    parser.add_argument("--flip", action="store_true")
     parser.add_argument("--sample-stride", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--preview", type=Path, default=None)
@@ -442,13 +548,18 @@ def main(argv: list[str] | None = None) -> int:
             build_dir=args.build_dir,
             fit=args.fit,
             denoise=args.denoise,
+            frame_hold=args.frame_hold,
+            motion_blur=args.motion_blur,
+            motion_masking=args.motion_masking,
+            chroma_weight=args.chroma_weight,
+            scene_cut_floor=args.scene_cut_floor,
             palette_count=args.palette_count,
             base_bank=args.base_bank,
             keyframe_interval=args.keyframe_interval,
             tolerance=args.tolerance,
             scene_cut_ratio=args.scene_cut_ratio,
             candidates=args.candidates,
-            allow_flip=not args.no_flip,
+            allow_flip=args.flip,
             sample_stride=args.sample_stride,
             seed=args.seed,
             preview=args.preview,

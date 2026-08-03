@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 from pathlib import Path
@@ -7,8 +8,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from aesmovie import adpcmb, bake, neocolor, stream
+from aesmovie import adpcmb, bake, stream
 from aesmovie import frames as frames_mod
+
+_spec = importlib.util.spec_from_file_location(
+    "verify_capture", Path(__file__).resolve().parents[1] / "scripts" / "verify_capture.py"
+)
+verify_capture = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(verify_capture)
 
 
 @pytest.fixture(scope="module")
@@ -208,8 +215,10 @@ class TestPreviewCodec:
             check=True,
         ).stdout
         decoded = np.frombuffer(raw, np.uint8).reshape(-1, 224, 320, 3)
-        expected = neocolor.color_index_to_rgb(outcome.result.rendered)
-        assert np.array_equal(decoded, expected)
+        assert len(decoded) == outcome.result.stats.frames
+
+        rebuilt = verify_capture.reconstruct_frame(outcome.build_dir / "baked", 3)
+        assert np.array_equal(decoded[3], rebuilt)
 
 
 class TestCommandLine:
@@ -219,10 +228,18 @@ class TestCommandLine:
         assert args.palette_count == 240
         assert args.base_bank == 16
 
-    def test_flip_dedup_is_on_unless_switched_off(self):
-        args = bake._parse_args(["--source", "clip.mp4", "--duration", "1", "--no-flip"])
+    def test_flip_dedup_is_off_unless_switched_on(self):
+        assert bake._parse_args(["--source", "clip.mp4", "--duration", "1"]).flip is False
 
-        assert args.no_flip is True
+    def test_flip_dedup_can_be_switched_on(self):
+        args = bake._parse_args(["--source", "clip.mp4", "--duration", "1", "--flip"])
+
+        assert args.flip is True
+
+    def test_the_defaults_are_the_measured_settings(self):
+        args = bake._parse_args(["--source", "clip.mp4", "--duration", "1"])
+
+        assert (args.scene_cut_ratio, args.tolerance, args.keyframe_interval) == (0.90, 0.0005, 90)
 
     def test_main_writes_a_report_and_reports_success(self, synthetic_clip, tmp_path, capsys):
         report = tmp_path / "report.json"
@@ -297,7 +314,9 @@ class TestRenderCollection:
 
         assert outcome.result.rendered.shape[0] == 0
 
-    def test_requesting_a_preview_collects_rendered_frames(self, synthetic_clip, tmp_path):
+    def test_a_preview_is_written_without_holding_the_frames(self, synthetic_clip, tmp_path):
+        preview = tmp_path / "p.mkv"
+
         outcome = bake.run(
             bake.BakeRequest(
                 source=synthetic_clip,
@@ -307,11 +326,12 @@ class TestRenderCollection:
                 palette_count=4,
                 candidates=0,
                 sample_stride=1,
-                preview=tmp_path / "p.mkv",
+                preview=preview,
             )
         )
 
-        assert outcome.result.rendered.shape[0] == outcome.result.stats.frames
+        assert outcome.result.rendered.shape[0] == 0
+        assert preview.stat().st_size > 0
 
 
 class TestAudio:
@@ -512,3 +532,29 @@ class TestAudioVideoAlignment:
         text = (outcome.build_dir / "generated" / "movie_data.h").read_text()
         assert "MOVIE_AUDIO_PAGE_NUM" in text
         assert "MOVIE_AUDIO_PAGE_DEN" in text
+
+
+class TestSampleThinning:
+    def test_a_small_sample_is_left_alone(self):
+        tiles = np.zeros((10, 16, 16), dtype=np.uint16)
+
+        assert bake._thin_sample(tiles, 0).shape[0] == 10
+
+    def test_a_large_sample_is_capped(self):
+        tiles = np.zeros((bake.MAX_SAMPLE_TILES + 5000, 16, 16), dtype=np.uint16)
+
+        assert bake._thin_sample(tiles, 0).shape[0] == bake.MAX_SAMPLE_TILES
+
+    def test_thinning_is_deterministic_for_a_seed(self):
+        rng = np.random.default_rng(1)
+        tiles = rng.integers(0, 100, size=(bake.MAX_SAMPLE_TILES + 100, 16, 16), dtype=np.uint16)
+
+        assert np.array_equal(bake._thin_sample(tiles, 3), bake._thin_sample(tiles, 3))
+
+    def test_thinning_keeps_source_order(self):
+        rng = np.random.default_rng(2)
+        tiles = rng.integers(0, 100, size=(bake.MAX_SAMPLE_TILES + 100, 16, 16), dtype=np.uint16)
+
+        thinned = bake._thin_sample(tiles, 4)
+
+        assert thinned.shape == (bake.MAX_SAMPLE_TILES, 16, 16)

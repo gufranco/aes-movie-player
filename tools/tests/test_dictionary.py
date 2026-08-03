@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from aesmovie.dictionary import MAX_TILES, TileDictionary
+from aesmovie.dictionary import TileDictionary
 
 
 def random_tile(seed: int) -> np.ndarray:
@@ -64,35 +64,38 @@ class TestInterning:
 
 
 class TestFlipDedup:
+    def flipping(self):
+        return TileDictionary(allow_flip=True)
+
     def test_a_horizontal_mirror_reuses_the_original_entry(self):
-        dictionary = TileDictionary()
+        dictionary = self.flipping()
         tile = asymmetric_tile(6)
         original = dictionary.intern(tile)
 
-        ref = dictionary.intern(tile[:, ::-1].copy())
+        ref = dictionary.intern(np.ascontiguousarray(tile[:, ::-1]))
 
         assert (ref.index, ref.hflip, ref.vflip) == (original.index, True, False)
 
     def test_a_vertical_mirror_reuses_the_original_entry(self):
-        dictionary = TileDictionary()
+        dictionary = self.flipping()
         tile = asymmetric_tile(7)
         original = dictionary.intern(tile)
 
-        ref = dictionary.intern(tile[::-1, :].copy())
+        ref = dictionary.intern(np.ascontiguousarray(tile[::-1, :]))
 
         assert (ref.index, ref.hflip, ref.vflip) == (original.index, False, True)
 
     def test_a_double_mirror_reuses_the_original_entry(self):
-        dictionary = TileDictionary()
+        dictionary = self.flipping()
         tile = asymmetric_tile(8)
         original = dictionary.intern(tile)
 
-        ref = dictionary.intern(tile[::-1, ::-1].copy())
+        ref = dictionary.intern(np.ascontiguousarray(tile[::-1, ::-1]))
 
         assert (ref.index, ref.hflip, ref.vflip) == (original.index, True, True)
 
     def test_all_four_orientations_share_one_entry(self):
-        dictionary = TileDictionary()
+        dictionary = self.flipping()
         tile = asymmetric_tile(9)
 
         for variant in (tile, tile[:, ::-1], tile[::-1, :], tile[::-1, ::-1]):
@@ -105,13 +108,13 @@ class TestFlipDedup:
         tile = asymmetric_tile(10)
         dictionary.intern(tile)
 
-        ref = dictionary.intern(tile[:, ::-1].copy())
+        ref = dictionary.intern(np.ascontiguousarray(tile[:, ::-1]))
 
         assert ref.index == 1
         assert ref.hflip is False
 
     def test_a_symmetric_tile_never_reports_a_flip_against_itself(self):
-        dictionary = TileDictionary()
+        dictionary = self.flipping()
         tile = np.zeros((16, 16), dtype=np.uint8)
         tile[4:12, 4:12] = 7
         original = dictionary.intern(tile)
@@ -136,12 +139,12 @@ class TestValidation:
         with pytest.raises(ValueError, match="4-bit"):
             dictionary.intern(tile)
 
-    def test_exceeding_the_twenty_bit_tile_number_is_rejected(self):
-        dictionary = TileDictionary()
-        dictionary._entries = [None] * MAX_TILES
+    def test_exceeding_the_capacity_is_rejected_for_a_single_intern(self):
+        dictionary = TileDictionary(capacity=1)
+        dictionary.intern(asymmetric_tile(11))
 
-        with pytest.raises(ValueError, match="20-bit"):
-            dictionary.intern(random_tile(11))
+        with pytest.raises(ValueError, match="full"):
+            dictionary.intern(asymmetric_tile(12))
 
 
 class TestBatch:
@@ -154,7 +157,7 @@ class TestBatch:
         assert len(refs) == 3
 
     def test_a_batch_dedups_across_its_own_members(self):
-        dictionary = TileDictionary()
+        dictionary = TileDictionary(allow_flip=True)
         tile = asymmetric_tile(23)
         tiles = np.stack([tile, tile[:, ::-1], tile])
 

@@ -85,3 +85,24 @@ def build_rom_images(
         msg = f"pad_to {target} is smaller than the {payload} byte payload"
         raise ValueError(msg)
     return c1.tobytes().ljust(target, b"\x00"), c2.tobytes().ljust(target, b"\x00")
+
+
+def unpack_tiles(
+    first: npt.NDArray[np.uint8], second: npt.NDArray[np.uint8]
+) -> npt.NDArray[np.uint8]:
+    """Recover nibble tiles from their packed ROM bytes.
+
+    The inverse of `pack_tiles`, used to check stored tiles against the
+    source. The ROM itself never needs this.
+    """
+    count = first.shape[0]
+    tiles = np.zeros((count, TILE_PX, TILE_PX), dtype=np.uint8)
+    for row in range(TILE_PX):
+        for half_offset, columns in ((0, slice(8, 16)), (32, slice(0, 8))):
+            byte = half_offset + (row << 1)
+            plane0 = (first[:, byte, None] >> _BIT_POSITIONS) & 1
+            plane1 = (first[:, byte + 1, None] >> _BIT_POSITIONS) & 1
+            plane2 = (second[:, byte, None] >> _BIT_POSITIONS) & 1
+            plane3 = (second[:, byte + 1, None] >> _BIT_POSITIONS) & 1
+            tiles[:, row, columns] = plane0 | (plane1 << 1) | (plane2 << 2) | (plane3 << 3)
+    return tiles
