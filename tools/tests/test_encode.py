@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from aesmovie import crom, encode, palettes, stream
+from aesmovie import crom, encode, neocolor, palettes, stream
 from tests.geolith_model import GeolithTileReader, StreamPlayer
 
 HEIGHT = 224
@@ -14,6 +14,10 @@ def flat_clip(count: int, color: tuple[int, int, int]) -> np.ndarray:
     clip = np.zeros((count, HEIGHT, WIDTH, 3), dtype=np.uint8)
     clip[:, :, :] = color
     return clip
+
+
+def options_for(**overrides):
+    return options(**overrides)
 
 
 def options(**overrides) -> encode.EncodeOptions:
@@ -594,3 +598,108 @@ class TestSeekEquivalence:
             assert int(offset) // stream.PROM_BANK_BYTES == (end - 1) // stream.PROM_BANK_BYTES, (
                 f"frame {frame} crosses a bank boundary"
             )
+
+
+class TestPaletteEpochs:
+    """Palettes refitted per scene, in alternating halves of CRAM.
+
+    A tile is an index into whichever bank its slot names, so a tile
+    interned under one epoch's palettes renders wrong under another's.
+    Epochs therefore never share dictionary entries, and the two halves
+    let the next epoch's colours be uploaded while the current one is
+    still on screen.
+    """
+
+    def two_scenes(self, count: int) -> np.ndarray:
+        rng = np.random.default_rng(5)
+        warm = rng.integers(0, 90, size=(count // 2, HEIGHT, WIDTH, 3), dtype=np.uint8)
+        warm[..., 0] += 160
+        cool = rng.integers(0, 90, size=(count - count // 2, HEIGHT, WIDTH, 3), dtype=np.uint8)
+        cool[..., 2] += 160
+        return np.concatenate([warm, cool])
+
+    def samples(self, clip: np.ndarray, split: int):
+        tiles = encode.to_tiles(neocolor.rgb_to_color_index(clip))
+        return [
+            (0, tiles[:split].reshape(-1, 16, 16)),
+            (split, tiles[split:].reshape(-1, 16, 16)),
+        ]
+
+    def encode_epochs(self, clip, split, **extra):
+        options = options_for(palette_count=8, **extra)
+        return encode.encode_stream(
+            [clip],
+            options,
+            sample_tiles=self.samples(clip, split)[0][1],
+            epoch_samples=self.samples(clip, split),
+            total_frames=clip.shape[0],
+        )
+
+    def test_it_builds_one_palette_set_per_epoch(self):
+        clip = self.two_scenes(8)
+
+        result = self.encode_epochs(clip, 4)
+
+        assert len(result.palette_sets) == 2
+
+    def test_the_halves_alternate(self):
+        clip = self.two_scenes(8)
+
+        result = self.encode_epochs(clip, 4)
+
+        banks = [palette_set.base_bank for palette_set in result.palette_sets]
+        assert banks[0] != banks[1]
+
+    def test_each_epoch_starts_on_a_keyframe(self):
+        clip = self.two_scenes(8)
+
+        result = self.encode_epochs(clip, 4)
+
+        assert 4 in list(result.stream.keyframes())
+
+    def four_scenes(self, per_scene: int) -> np.ndarray:
+        """Four scenes with disjoint colour ranges.
+
+        One shared set has to span every scene while a per-epoch set
+        only spans its own, which is where refitting pays. With just two
+        scenes the halving for double buffering cancels the gain
+        exactly, so the effect needs more scenes than halves.
+        """
+        rng = np.random.default_rng(5)
+        scenes = []
+        for channel, boost in ((0, 150), (1, 150), (2, 150), (0, 60)):
+            block = rng.integers(0, 80, size=(per_scene, HEIGHT, WIDTH, 3), dtype=np.uint8)
+            block[..., channel] = np.minimum(255, block[..., channel] + boost)
+            scenes.append(block)
+        return np.concatenate(scenes)
+
+    def test_refitting_per_scene_beats_one_shared_set(self):
+        per_scene = 3
+        clip = self.four_scenes(per_scene)
+        tiles = encode.to_tiles(neocolor.rgb_to_color_index(clip))
+        epochs = [
+            (
+                index * per_scene,
+                tiles[index * per_scene : (index + 1) * per_scene].reshape(-1, 16, 16),
+            )
+            for index in range(4)
+        ]
+        shared = encode.encode(clip, options_for(palette_count=16))
+
+        split = encode.encode_stream(
+            [clip],
+            options_for(palette_count=16),
+            sample_tiles=epochs[0][1],
+            epoch_samples=epochs,
+            total_frames=clip.shape[0],
+        )
+
+        assert split.stats.displayed_error < shared.stats.displayed_error
+
+    def test_epochs_never_share_dictionary_entries(self):
+        clip = self.two_scenes(8)
+
+        result = self.encode_epochs(clip, 4)
+
+        assert result.stats.tile_count > 0
+        assert not result.stats.dictionary_full

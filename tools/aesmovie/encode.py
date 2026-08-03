@@ -19,7 +19,7 @@ dictionary richness is C-ROM.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -85,6 +85,7 @@ class EncodeResult:
     stream: stream.MovieStream
     dictionary: TileDictionary
     palette_set: palettes.PaletteSet
+    palette_sets: list[palettes.PaletteSet]
     updates_per_frame: npt.NDArray[np.int32]
     rendered: npt.NDArray[np.uint16]
     stats: EncodeStats
@@ -378,6 +379,15 @@ class _Screen:
         screen_lab = grid[self.render[targets]]
         return ((source_lab - screen_lab) ** 2).sum(axis=3).mean(axis=(1, 2))
 
+    def retarget(self, palette_set: palettes.PaletteSet) -> None:
+        """Point the model at a new epoch's colours.
+
+        What is on screen does not change, so the model of it must not
+        either. Only the palettes that later assignments are measured
+        against move.
+        """
+        self._palette_set = palette_set
+
     def fidelity(self, source: npt.NDArray[np.uint16]) -> float:
         """Mean squared Oklab error of the whole displayed frame.
 
@@ -453,12 +463,86 @@ def encode(clip: npt.NDArray[np.uint8], options: EncodeOptions) -> EncodeResult:
     )
 
 
+def _build_palette_sets(
+    options: EncodeOptions,
+    sample_tiles: npt.NDArray[np.uint16],
+    epoch_samples: Sequence[tuple[int, npt.NDArray[np.uint16]]] | None,
+) -> tuple[list[int], list[palettes.PaletteSet]]:
+    """One palette set per epoch, alternating between the two CRAM halves.
+
+    Colours refitted per scene score around a tenth better than a single
+    set stretched over a whole feature, but the new set has to reach CRAM
+    before the scene it belongs to appears. Alternating halves buys that
+    time: the next epoch is written into the half nobody is reading while
+    the current one is still on screen.
+    """
+    if not epoch_samples:
+        return [0], [
+            palettes.build_palette_set(
+                sample_tiles,
+                count=options.palette_count,
+                base_bank=options.base_bank,
+                seed=options.seed,
+                chroma_weight=options.chroma_weight,
+            )
+        ]
+
+    half = options.palette_count // 2
+    starts: list[int] = []
+    sets: list[palettes.PaletteSet] = []
+    for epoch, (start, tiles) in enumerate(epoch_samples):
+        starts.append(start)
+        sets.append(
+            palettes.build_palette_set(
+                tiles,
+                count=half,
+                base_bank=options.base_bank + (epoch % 2) * half,
+                seed=options.seed + epoch,
+                chroma_weight=options.chroma_weight,
+            )
+        )
+    return starts, sets
+
+
+def _enter_epoch(
+    palette_set: palettes.PaletteSet,
+    epoch: int,
+    screen: _Screen,
+    dictionary: TileDictionary,
+    options: EncodeOptions,
+) -> palettes.PaletteAssigner:
+    """Move the encoder onto a new epoch's colours."""
+    screen.retarget(palette_set)
+    dictionary.reseed(epoch)
+    return palettes.PaletteAssigner(palette_set, candidates=options.candidates)
+
+
+def _record_frame(
+    screen: _Screen,
+    incoming: npt.NDArray[np.uint16],
+    index: int,
+    rendered: npt.NDArray[np.uint16],
+    *,
+    totals: _Totals,
+    options: EncodeOptions,
+    on_render: Callable[[npt.NDArray[np.uint16]], None] | None,
+) -> None:
+    """Score this frame and hand the picture to whoever wants it."""
+    totals.displayed_error_total += screen.fidelity(incoming)
+    totals.displayed_frames += 1
+    if options.collect_rendered:
+        rendered[index] = from_tiles(screen.render)
+    if on_render is not None:
+        on_render(from_tiles(screen.render))
+
+
 def encode_stream(
     chunks: Iterable[npt.NDArray[np.uint8]],
     options: EncodeOptions,
     *,
     sample_tiles: npt.NDArray[np.uint16],
     total_frames: int,
+    epoch_samples: Sequence[tuple[int, npt.NDArray[np.uint16]]] | None = None,
     on_render: Callable[[npt.NDArray[np.uint16]], None] | None = None,
 ) -> EncodeResult:
     """Encode frames as they arrive, holding only two frames at a time.
@@ -468,16 +552,11 @@ def encode_stream(
     length, so the palette set is fitted from a strided sample taken in
     an earlier pass and the frames themselves stream past.
     """
-    palette_set = palettes.build_palette_set(
-        sample_tiles,
-        count=options.palette_count,
-        base_bank=options.base_bank,
-        seed=options.seed,
-        chroma_weight=options.chroma_weight,
-    )
-    assigner = palettes.PaletteAssigner(palette_set, candidates=options.candidates)
+    epoch_starts, palette_sets = _build_palette_sets(options, sample_tiles, epoch_samples)
+    epoch = 0
     dictionary = _new_dictionary(options)
-    screen = _Screen(palette_set)
+    screen = _Screen(palette_sets[0])
+    assigner = _enter_epoch(palette_sets[0], 0, screen, dictionary, options)
     movie = stream.MovieStream()
 
     rendered = (
@@ -505,7 +584,12 @@ def encode_stream(
         )
         previous_source = previous
         previous = current
-        scene_cut = _is_scene_cut(current, previous_source, changed, index, options)
+        if epoch + 1 < len(epoch_starts) and index >= epoch_starts[epoch + 1]:
+            epoch += 1
+            assigner = _enter_epoch(palette_sets[epoch], epoch, screen, dictionary, options)
+        scene_cut = _is_scene_cut(current, previous_source, changed, index, options) or (
+            index in epoch_starts and index > 0
+        )
         keyframe = scene_cut or (index - last_keyframe >= options.keyframe_interval)
 
         if keyframe:
@@ -542,12 +626,15 @@ def encode_stream(
             totals.delta_bytes += written
 
         updates_per_frame[index] = len(updates)
-        totals.displayed_error_total += screen.fidelity(incoming)
-        totals.displayed_frames += 1
-        if options.collect_rendered:
-            rendered[index] = from_tiles(screen.render)
-        if on_render is not None:
-            on_render(from_tiles(screen.render))
+        _record_frame(
+            screen,
+            incoming,
+            index,
+            rendered,
+            totals=totals,
+            options=options,
+            on_render=on_render,
+        )
 
     stats = _build_stats(
         movie=movie,
@@ -560,7 +647,8 @@ def encode_stream(
     return EncodeResult(
         stream=movie,
         dictionary=dictionary,
-        palette_set=palette_set,
+        palette_set=palette_sets[0],
+        palette_sets=palette_sets,
         updates_per_frame=updates_per_frame,
         rendered=rendered,
         stats=stats,
