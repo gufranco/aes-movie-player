@@ -267,3 +267,52 @@ class TestReferenceTier:
 
         assert fit is not None
         assert fit.tier is self.tier()
+
+
+class TestAudioTakesWhatIsFree:
+    """The voice ROM is its own chip, so audio quality costs no video.
+
+    Nothing about the sample rate touches the character ROM the picture
+    is built from, so the only reason to hold it down is the length of
+    the movie. It should therefore start at what the chip can do and
+    come down only when runtime demands it.
+    """
+
+    def test_a_short_movie_gets_the_chip_maximum(self):
+        assert quality.audio_hz_for(1.0) == pytest.approx(quality.MAX_AUDIO_HZ, rel=0.01)
+
+    def test_a_ten_minute_movie_still_beats_the_old_ceiling(self):
+        assert quality.audio_hz_for(10.0) > 22050.0
+
+    def test_a_long_movie_comes_down_to_fit(self):
+        assert quality.audio_hz_for(40.0) < quality.audio_hz_for(10.0)
+
+    @pytest.mark.parametrize("minutes", [1.0, 10.0, 25.0, 40.0, 90.0])
+    def test_it_always_fits_the_page_counter(self, minutes):
+        rate = quality.audio_hz_for(minutes)
+
+        pages = minutes * quality.SECONDS_PER_MINUTE * rate * 0.5 / quality.ADPCM_B_PAGE_BYTES
+
+        assert pages <= quality.ADPCM_B_MAX_PAGES
+
+
+class TestAudioGrade:
+    """Audio reported on the same eighteen-step scale as the picture.
+
+    The rate itself stays continuous, because audio competes with
+    nothing and rounding it down to a step could only throw quality
+    away. The grade exists so the two can be compared at a glance.
+    """
+
+    def test_the_chip_maximum_is_the_top_grade(self):
+        assert quality.audio_grade(quality.MAX_AUDIO_HZ) == 1
+
+    def test_a_lower_rate_gives_a_worse_grade(self):
+        assert quality.audio_grade(11025.0) > quality.audio_grade(44100.0)
+
+    def test_grades_stay_inside_the_ladder(self):
+        for rate in (55555.0, 44100.0, 22050.0, 11025.0, 8000.0, 4000.0):
+            assert 1 <= quality.audio_grade(rate) <= len(quality.LADDER)
+
+    def test_a_short_movie_is_graded_top(self):
+        assert quality.audio_grade(quality.audio_hz_for(2.0)) == 1

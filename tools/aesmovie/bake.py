@@ -101,6 +101,11 @@ def _decode_audio(
     return np.frombuffer(result.stdout, dtype="<i2")
 
 
+def self_tier_name(request: BakeRequest) -> str:
+    """The rung this cart was baked at, for the overlay to display."""
+    return (request.quality or "custom").upper()[:8]
+
+
 def _fix_defines() -> str:
     names = {
         "blank": "FIX_TILE_BLANK",
@@ -118,6 +123,10 @@ def _fix_defines() -> str:
         "bar_cap_left": "FIX_TILE_BAR_CAP_LEFT",
         "bar_cap_right": "FIX_TILE_BAR_CAP_RIGHT",
         "bar_knob": "FIX_TILE_BAR_KNOB",
+        "A": "FIX_TILE_A",
+        "percent": "FIX_TILE_PERCENT",
+        "dot": "FIX_TILE_DOT",
+        "dash": "FIX_TILE_DASH",
     }
     return "\n".join(f"#define {macro} {fixtiles.GLYPHS[glyph]}" for glyph, macro in names.items())
 
@@ -131,6 +140,12 @@ _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 #define MOVIE_PALETTE_BASE {base_bank}
 #define MOVIE_EPOCH_COUNT {epochs}
 #define MOVIE_EPOCH_PALETTES {epoch_palettes}
+#define MOVIE_IMAGE_WIDTH {image_width}
+#define MOVIE_IMAGE_HEIGHT {image_height}
+#define MOVIE_TIER_NAME "{tier_name}"
+#define MOVIE_CHROMA_PERCENT {chroma_percent}
+#define MOVIE_CROM_PERCENT {crom_percent}
+#define MOVIE_AUDIO_HZ {audio_hz}
 #define MOVIE_KEYFRAME_COUNT {keyframes}
 #define MOVIE_GRID_COLS {cols}
 #define MOVIE_GRID_ROWS {rows}
@@ -185,6 +200,7 @@ class BakeRequest:
     chroma_weight: float = 1.0
     scene_cut_floor: float = 0.01
     palette_epoch_seconds: float = 5.0
+    quality: str | None = None
     tile_budget: int = 0
     audio_rate_hz: float = 22050.0
     audio: bool = True
@@ -279,6 +295,7 @@ def _write_sources(
     build_dir: Path,
     outcome_paths: dict[str, Path],
     result: encode.EncodeResult,
+    request: BakeRequest,
     audio_pages: Fraction = Fraction(0),
 ) -> tuple[Path, Path]:
     generated = build_dir / "generated"
@@ -304,6 +321,12 @@ def _write_sources(
             palettes=len(result.palette_set),
             epochs=len(result.palette_sets),
             epoch_palettes=len(result.palette_sets[0]),
+            image_width=encode.FRAME_WIDTH,
+            image_height=encode.FRAME_HEIGHT,
+            tier_name=self_tier_name(request),
+            chroma_percent=round(request.chroma_weight * 100),
+            crom_percent=round(100 * result.stats.crom_payload_bytes / CROM_BANK_BYTES),
+            audio_hz=round(request.audio_rate_hz),
             base_bank=result.palette_set.base_bank,
             keyframes=result.stats.keyframe_count,
             cols=encode.GRID_COLS,
@@ -600,7 +623,7 @@ def run(request: BakeRequest) -> BakeOutcome:
             _write_audio_params(request.build_dir, encoded)
             audio_pages = audio_pages_per_frame(encoded.delta_n)
 
-    asm, header = _write_sources(request.build_dir, artifacts, result, audio_pages)
+    asm, header = _write_sources(request.build_dir, artifacts, result, request, audio_pages)
     artifacts["asm"] = asm
     artifacts["header"] = header
 
@@ -743,6 +766,7 @@ def main(argv: list[str] | None = None) -> int:
             chroma_weight=_pick(args.chroma_weight, tier.chroma_weight if tier else None, 1.0),
             scene_cut_floor=args.scene_cut_floor,
             palette_epoch_seconds=args.palette_epoch_seconds,
+            quality=args.quality,
             tile_budget=_pick(args.tile_budget, tile_budget, 0),
             palette_count=args.palette_count,
             base_bank=args.base_bank,

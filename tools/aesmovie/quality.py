@@ -59,7 +59,8 @@ ADPCM_B_BYTES_PER_SAMPLE: Final = 0.5
 ADPCM_B_PAGE_BYTES: Final = 256
 ADPCM_B_MAX_PAGES: Final = ADPCM_B_BYTES // ADPCM_B_PAGE_BYTES
 
-DEFAULT_AUDIO_HZ: Final = 22050.0
+MAX_AUDIO_HZ: Final = 55555.0
+DEFAULT_AUDIO_HZ: Final = MAX_AUDIO_HZ
 MIN_AUDIO_HZ: Final = 8000.0
 SECONDS_PER_MINUTE: Final = 60.0
 SAFETY_MARGIN: Final = 0.92
@@ -148,8 +149,33 @@ def max_minutes(tier: Tier, reference_rate: float) -> float:
     return CROM_TILES / rate
 
 
+def audio_grade(rate_hz: float) -> int:
+    """Where a sample rate sits on the same scale the picture uses.
+
+    The rate itself is never rounded to a step. Audio lives in its own
+    ROM and competes with nothing, so the planner always takes the
+    highest rate that fits and stepping it could only give quality away.
+    This is for reporting: it places whatever rate came out on the same
+    eighteen-rung scale as the picture, so the two are comparable at a
+    glance. Grade one is the chip's own maximum, and each grade down is
+    the same ratio the picture ladder uses between neighbours.
+    """
+    steps = len(LADDER)
+    if rate_hz >= MAX_AUDIO_HZ:
+        return 1
+    span = MAX_AUDIO_HZ / MIN_AUDIO_HZ
+    ratio = MAX_AUDIO_HZ / max(rate_hz, MIN_AUDIO_HZ)
+    grade = 1 + round((steps - 1) * math.log(ratio) / math.log(span))
+    return max(1, min(steps, grade))
+
+
 def audio_hz_for(minutes: float) -> float:
     """Highest sample rate whose soundtrack the player can still address.
+
+    Audio lives in its own ROM, so a finer rate costs the picture
+    nothing at all and the only thing holding it down is how long the
+    movie runs. It therefore starts at what the chip itself can play and
+    comes down only far enough to fit.
 
     The limit is the page counter rather than the ROM. ADPCM-B addresses
     in 256-byte pages through a 16-bit register, so the last page a
@@ -260,6 +286,7 @@ def _budget_lines(fit: Fit, reference_rate: float, has_audio: bool) -> list[str]
         lines.append(
             f"  audio   {_mib(audio_bytes):>10} of {_mib(ADPCM_B_BYTES)}"
             f"   {audio_bytes / ADPCM_B_BYTES:5.0%}   at {audio_hz / 1000:.1f} kHz"
+            f", grade {audio_grade(audio_hz)} of {len(LADDER)}"
         )
         if audio_hz < DEFAULT_AUDIO_HZ:
             lines.append(
