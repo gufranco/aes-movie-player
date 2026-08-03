@@ -12,3 +12,7 @@ assets/clip/
 build-bake.log
 core
 core.*
+cfg/
+nvram/
+snap/
+diff/
