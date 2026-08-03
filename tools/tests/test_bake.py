@@ -623,3 +623,60 @@ class TestQualityResolution:
         bake._resolve_quality(self.args(synthetic_clip, quality="auto"))
 
         assert "Quality ladder" in capsys.readouterr().err
+
+
+class TestPaletteEpochFlag:
+    def test_epochs_are_on_by_default(self):
+        args = bake._parse_args(["--source", "clip.mp4", "--duration", "1"])
+
+        assert args.palette_epoch_seconds > 0.0
+
+    def test_epochs_can_be_switched_off(self):
+        args = bake._parse_args(
+            ["--source", "clip.mp4", "--duration", "1", "--palette-epoch-seconds", "0"]
+        )
+
+        assert args.palette_epoch_seconds == 0.0
+
+    def test_a_long_clip_is_split_into_several_epochs(self, synthetic_clip, tmp_path):
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=synthetic_clip,
+                start=0.0,
+                duration=1.0,
+                build_dir=tmp_path / "many",
+                palette_count=8,
+                palette_epoch_seconds=0.25,
+            )
+        )
+
+        assert len(outcome.result.palette_sets) > 1
+
+    def test_switching_epochs_off_leaves_one_palette_set(self, synthetic_clip, tmp_path):
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=synthetic_clip,
+                start=0.0,
+                duration=1.0,
+                build_dir=tmp_path / "one",
+                palette_count=8,
+                palette_epoch_seconds=0.0,
+            )
+        )
+
+        assert len(outcome.result.palette_sets) == 1
+
+    def test_the_epoch_table_names_every_epoch(self, synthetic_clip, tmp_path):
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=synthetic_clip,
+                start=0.0,
+                duration=1.0,
+                build_dir=tmp_path / "table",
+                palette_count=8,
+                palette_epoch_seconds=0.25,
+            )
+        )
+
+        table = (outcome.build_dir / "baked" / "epochs.bin").read_bytes()
+        assert len(table) == 4 * len(outcome.result.palette_sets)

@@ -18,11 +18,13 @@ and reproduces bit-exactly what the baker predicted.
 - [How it works](#how-it-works)
 - [Hardware ceilings](#hardware-ceilings)
 - [The quality system](#the-quality-system)
+- [Per-scene palettes](#per-scene-palettes)
 - [Rate control](#rate-control)
 - [Colour](#colour)
 - [Usage](#usage)
 - [Verification](#verification)
 - [What did not work](#what-did-not-work)
+- [Hardware notes worth knowing](#hardware-notes-worth-knowing)
 - [Repository layout](#repository-layout)
 
 ## How it works
@@ -162,6 +164,32 @@ bake, 3 windows read 0.62 times the true rate, 6 read 1.58, and 12 read
 0.91, while total sampled time barely mattered. Coverage of the content is
 what converges. The default of 24 short windows lands within a percent, for
 72 seconds of sampling.
+
+## Per-scene palettes
+
+CRAM holds 240 palettes for video, and one set stretched over a whole
+feature has to cover every scene in it. The baker instead cuts the movie
+into epochs and refits colours for each, which measures about 6% less error
+on real footage for 1.5% more tiles.
+
+The set has to reach CRAM before the scene it belongs to appears, and a full
+set is around 17,900 cycles against a vblank of roughly 30,700, so it cannot
+be written in one frame. Epochs therefore alternate between the two halves
+of the allocation: while one half is being read, the next epoch is written
+into the other, a slice per frame across the hundreds of frames an epoch
+lasts. Seeks and rewinds have no run-up, so they make the target epoch
+resident at once.
+
+Epochs never share dictionary entries. A tile stores palette indices rather
+than colours, so one interned while a bank held one epoch's colours draws
+wrong once that bank holds another's. Scenes share about 0.1% of their
+tiles, so giving that up costs almost nothing.
+
+The idea comes from libNG's `colorStream`, the library behind the Neo Geo
+Bad Apple demo, which stores palette changes as forward and backward deltas
+so they survive seeking and reverse playback.
+
+Set `--palette-epoch-seconds 0` to go back to a single shared set.
 
 ## Rate control
 
@@ -327,6 +355,16 @@ and each false cut rewrote all 280 slots. And a metric that averages the
 error of tiles the encoder *wrote* improves whenever the encoder skips more
 work, so it rewards doing less; the fidelity number here charges every slot
 of every frame against the true source frame instead.
+
+## Hardware notes worth knowing
+
+The address port sits at 0x3C0000 and the data port immediately after it, so
+a single 32-bit write lands both. Every scattered VRAM write costs one
+instruction instead of two. Runs still stream through the auto-increment
+port, where one write per word is already the floor.
+
+The fix layer has 32 rows but the raster only shows rows 2 to 29, so an
+overlay anchored to row 27 floats two rows above the bottom edge.
 
 ## Repository layout
 

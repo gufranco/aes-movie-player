@@ -116,6 +116,26 @@ def _palette_colors(blob: bytes) -> np.ndarray:
     return ((r5 << 10) | (g5 << 5) | b5).astype(np.uint16)
 
 
+def _epoch_palettes(baked: Path, frame: int, colors: np.ndarray) -> tuple[int, np.ndarray]:
+    """The palette set on screen at a frame, and which half it sits in.
+
+    Colours are refitted per scene into alternating halves of CRAM, so a
+    reconstruction has to pick the epoch covering the frame and read its
+    slice of the blob. A movie with one epoch keeps the whole blob.
+    """
+    table = baked / "epochs.bin"
+    if not table.is_file():
+        return 0, colors
+    starts = struct.unpack(f">{table.stat().st_size // 4}I", table.read_bytes())
+    if len(starts) <= 1:
+        return 0, colors
+    epoch = 0
+    while epoch + 1 < len(starts) and starts[epoch + 1] <= frame:
+        epoch += 1
+    per_epoch = colors.shape[0] // len(starts)
+    return epoch, colors[epoch * per_epoch : (epoch + 1) * per_epoch]
+
+
 def reconstruct_frame(baked: Path, frame: int, *, base_bank: int = 16) -> np.ndarray:
     """Rebuild one frame's picture from the cart artifacts alone.
 
@@ -138,7 +158,10 @@ def reconstruct_frame(baked: Path, frame: int, *, base_bank: int = 16) -> np.nda
 
     reader = GeolithTileReader((baked / "c1.bin").read_bytes(), (baked / "c2.bin").read_bytes())
     colors = _palette_colors((baked / "palettes.bin").read_bytes())
-    return neocolor.color_index_to_rgb(player.render(reader, colors, base_bank))
+    epoch, colors = _epoch_palettes(baked, frame, colors)
+    return neocolor.color_index_to_rgb(
+        player.render(reader, colors, base_bank + (epoch & 1) * colors.shape[0])
+    )
 
 
 def main(argv: list[str]) -> int:

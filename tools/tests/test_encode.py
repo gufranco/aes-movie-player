@@ -752,3 +752,20 @@ class TestEpochSchedule:
 
         assert len(result.palette_sets) == 1
         assert len(result.palette_sets[0]) == 8
+
+
+class TestSingleEpochAllocation:
+    def test_one_epoch_keeps_every_palette(self):
+        rng = np.random.default_rng(4)
+        clip = rng.integers(0, 256, size=(4, HEIGHT, WIDTH, 3), dtype=np.uint8)
+        tiles = encode.to_tiles(neocolor.rgb_to_color_index(clip)).reshape(-1, 16, 16)
+
+        result = encode.encode_stream(
+            [clip],
+            options_for(palette_count=8),
+            sample_tiles=tiles,
+            epoch_samples=[(0, tiles)],
+            total_frames=clip.shape[0],
+        )
+
+        assert len(result.palette_sets[0]) == 8

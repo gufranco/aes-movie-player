@@ -183,6 +183,7 @@ class BakeRequest:
     motion_masking: float = 0.0
     chroma_weight: float = 1.0
     scene_cut_floor: float = 0.01
+    palette_epoch_seconds: float = 5.0
     tile_budget: int = 0
     audio_rate_hz: float = 22050.0
     audio: bool = True
@@ -211,6 +212,8 @@ class BakeOutcome:
             "motion_masking": self.request.motion_masking,
             "chroma_weight": self.request.chroma_weight,
             "scene_cut_floor": self.request.scene_cut_floor,
+            "palette_epoch_seconds": self.request.palette_epoch_seconds,
+            "palette_epochs": len(self.result.palette_sets),
             "tile_budget": self.request.tile_budget,
             "tile_count": stats.tile_count,
             "dictionary_full": stats.dictionary_full,
@@ -448,6 +451,33 @@ def _epoch_blob(result: encode.EncodeResult) -> bytes:
     return np.asarray(result.epoch_starts, dtype=">u4").tobytes()
 
 
+def _epoch_samples(
+    grids: npt.NDArray[np.uint16], request: BakeRequest
+) -> list[tuple[int, npt.NDArray[np.uint16]]] | None:
+    """Split the palette sample into one bucket per epoch.
+
+    The sample is every `sample_stride`-th frame in order, so a movie
+    frame maps onto a sample row by dividing by that stride. Buckets are
+    thinned individually, since thinning the whole sample first would
+    shuffle away the ordering the split depends on.
+    """
+    if request.palette_epoch_seconds <= 0.0:
+        return None
+    step = int(request.palette_epoch_seconds * float(frames.VBLANK_FPS))
+    if step <= 0:
+        return None
+    stride = max(1, request.sample_stride)
+    total = frames.frame_count(seconds=request.duration)
+    buckets: list[tuple[int, npt.NDArray[np.uint16]]] = []
+    for start in range(0, total, step):
+        rows = grids[start // stride : (start + step + stride - 1) // stride]
+        if rows.shape[0] == 0:
+            continue
+        tiles = rows.reshape(-1, encode.TILE_PX, encode.TILE_PX)
+        buckets.append((start, _thin_sample(tiles, request.seed + start)))
+    return buckets or None
+
+
 def run(request: BakeRequest) -> BakeOutcome:
     """Decode, encode, and write every cart artifact."""
     sample_clip = frames.sample(
@@ -459,11 +489,13 @@ def run(request: BakeRequest) -> BakeOutcome:
         denoise=request.denoise,
         motion_blur=request.motion_blur,
     )
-    sample_tiles = encode.to_tiles(neocolor.rgb_to_color_index(sample_clip)).reshape(
-        -1, encode.TILE_PX, encode.TILE_PX
-    )
+    sample_grids = encode.to_tiles(neocolor.rgb_to_color_index(sample_clip))
     del sample_clip
-    sample_tiles = _thin_sample(sample_tiles, request.seed)
+    epoch_samples = _epoch_samples(sample_grids, request)
+    sample_tiles = _thin_sample(
+        sample_grids.reshape(-1, encode.TILE_PX, encode.TILE_PX), request.seed
+    )
+    del sample_grids
 
     preview = _PreviewWriter(request.preview) if request.preview else None
     chunks = frames.stream(
@@ -494,6 +526,7 @@ def run(request: BakeRequest) -> BakeOutcome:
             collect_rendered=False,
         ),
         sample_tiles=sample_tiles,
+        epoch_samples=epoch_samples,
         total_frames=frames.frame_count(seconds=request.duration),
         on_render=preview.write if preview else None,
     )
@@ -564,6 +597,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--motion-masking", type=float, default=0.0)
     parser.add_argument("--chroma-weight", type=float, default=None)
     parser.add_argument("--scene-cut-floor", type=float, default=0.01)
+    parser.add_argument("--palette-epoch-seconds", type=float, default=5.0)
     parser.add_argument("--tile-budget", type=int, default=None)
     parser.add_argument("--palette-count", type=int, default=240)
     parser.add_argument("--base-bank", type=int, default=16)
@@ -677,6 +711,7 @@ def main(argv: list[str] | None = None) -> int:
             motion_masking=args.motion_masking,
             chroma_weight=_pick(args.chroma_weight, tier.chroma_weight if tier else None, 1.0),
             scene_cut_floor=args.scene_cut_floor,
+            palette_epoch_seconds=args.palette_epoch_seconds,
             tile_budget=_pick(args.tile_budget, tile_budget, 0),
             palette_count=args.palette_count,
             base_bank=args.base_bank,

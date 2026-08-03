@@ -476,11 +476,27 @@ def _build_palette_sets(
     before the scene it belongs to appears. Alternating halves buys that
     time: the next epoch is written into the half nobody is reading while
     the current one is still on screen.
+
+    A movie with one epoch has nothing to alternate with, so it keeps the
+    whole allocation. Halving it there would give up half the colours to
+    buy time nobody needs.
     """
     if not epoch_samples:
         return [0], [
             palettes.build_palette_set(
                 sample_tiles,
+                count=options.palette_count,
+                base_bank=options.base_bank,
+                seed=options.seed,
+                chroma_weight=options.chroma_weight,
+            )
+        ]
+
+    if len(epoch_samples) == 1:
+        start, tiles = epoch_samples[0]
+        return [start], [
+            palettes.build_palette_set(
+                tiles,
                 count=options.palette_count,
                 base_bank=options.base_bank,
                 seed=options.seed,
