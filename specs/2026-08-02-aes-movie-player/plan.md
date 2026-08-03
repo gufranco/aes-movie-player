@@ -117,6 +117,120 @@ The cart runtime is a small state machine on the 68000, plus the Z80 audio drive
 
 Net-new: the video encoder passes, the delta and keyframe command-stream format, the seek index, the ADPCM-B encoder, the Z80 streaming driver, the on-cart player and menu, and C-ROM bankswitching support in the packaging.
 
+## Confirmed hardware encodings
+
+Resolved on 2026-08-02 by reading the geolith LSPC implementation, the emulator this project verifies against, so these are the encodings the target decoder actually applies. Citations in `references.md`. They close the SCB and color caveats that were open at design time.
+
+### SCB1 tile entry, two words per tile
+
+| Field | Location |
+|-------|----------|
+| Tile number bits 15 to 0 | even word |
+| Tile number bits 19 to 16 | odd word bits 7 to 4 |
+| Horizontal flip | odd word bit 0 |
+| Vertical flip | odd word bit 1 |
+| Auto-animation | odd word bits 3 to 2, `01` is 4 tiles, `1x` is 8 tiles |
+| Palette | odd word bits 15 to 8 |
+
+So the attribute word is `(palette << 8) | (tile_hi << 4) | (aa << 2) | (vflip << 1) | hflip`.
+
+### Sprite geometry
+
+| Register | Encoding |
+|----------|----------|
+| SCB2 at `0x8000 + n` | vshrink in bits 7 to 0, `0xFF` full. hshrink in bits 11 to 8, `0x0F` full |
+| SCB3 at `0x8200 + n` | Y in bits 15 to 7 as `496 - top` for a visible-area origin. Sticky in bit 6. Height in tiles in bits 5 to 0 |
+| SCB4 at `0x8400 + n` | X in bits 15 to 7 |
+
+Sticky chains a sprite to the previous one, advancing X by `hshrink + 1`, which is 16 at full width, and inheriting Y and height. Sprite index 0 is never drawn, so the video grid occupies sprites 1 to 20.
+
+### Color
+
+The palette word is `|D0|R1|G1|B1|R5R4R3R2|G5G4G3G2|B5B4B3B2|`. Each channel is 5 independent bits plus `D0`, a sixth bit shared across all three channels, so the per-channel 6-bit level is `2 * c5 + (1 - D0)` and the displayed 8-bit value is `(level * 259 + 33) >> 6`. The baker fixes `D0` to 0 and uses 32 levels per channel, which caps quantization error near 1.6 percent, far below the error the 15-colors-per-tile constraint imposes. Index 0 of every sprite palette is transparent, so a palette carries 15 usable colors.
+
+This supersedes the 4-bit-per-channel `rgb_to_neogeo` in the DoomNG `palette.py`, which discards the three low bits. Video quality needs the full 15-bit color, so the color model is adapted rather than reused.
+
+## Spike layout
+
+The spike bakes 425 to 445 seconds of Big Buck Bunny, 720p 24 fps, chosen by a whole-movie motion scan for the widest motion range available in a 20 second window: near-static at one end, cuts and fast action at the other. Clip content is CC-BY Blender Foundation and is not committed.
+
+The baker lives under `tools/`, the cart under `src/`, and every generated artifact under `build/`.
+
+| Path | Role |
+|------|------|
+| `tools/pyproject.toml` | uv project for the baker |
+| `tools/aesmovie/neocolor.py` | Neo Geo color model, OKLab distance |
+| `tools/aesmovie/frames.py` | ffmpeg decode, crop, scale, vblank-rate resample |
+| `tools/aesmovie/palettes.py` | per-tile palette clustering and assignment |
+| `tools/aesmovie/crom.py` | 16x16 tile packer, adapted from DoomNG |
+| `tools/aesmovie/dictionary.py` | global tile dedup including flips |
+| `tools/aesmovie/stream.py` | keyframe and delta command stream, seek index |
+| `tools/aesmovie/encode.py` | per-frame slot loop, temporal tolerance, keyframe cadence |
+| `tools/aesmovie/bake.py` | CLI that drives the passes and reports sizes |
+| `tools/tests/` | unit tests for the pure encoders |
+| `src/hw.h` | LSPC, CRAM, and SCB helpers |
+| `src/main.c` | vblank-driven player |
+| `src/movie_data.S` | links the baked blobs into the ROM |
+| `toolchain/build-in-docker.sh` | ngdevkit build and .neo packaging |
+| `tools/scripts/capture_rom.sh` | headless geolith capture |
+| `tools/scripts/verify_capture.py` | matches a geolith capture against the baker's own render |
+| `NEXT_SESSION.md` | handoff, derived from this plan |
+
+### Spike simplifications
+
+Named so they are not mistaken for the final design.
+
+- Framing fills the screen by center-cropping to 320x224 rather than letterboxing. Full screen is the stated goal, and black bars would inflate the dedup rate and flatter the C-ROM measurement.
+- One global palette set for the whole clip, 240 palettes at CRAM banks 16 to 255, leaving banks 0 to 15 for the fix-layer menu. Per-keyframe palette sets come later.
+- The command stream is uncompressed and lives in P-ROM as a linked blob, which holds for 20 seconds but not for a feature runtime.
+- Audio is deferred to M2. The spike answers the two questions that need real footage, dictionary size and quantization in motion, and both are video questions.
+
+## Spike measurements, 2026-08-02
+
+Twenty seconds of Big Buck Bunny at 425 to 445 seconds, 1183 frames at the vblank rate, full-screen center crop, 240 palettes, keyframe interval 90, scene-cut ratio 0.90, tolerance 0.0005, flip dedup on.
+
+| Measure | Value |
+|---------|-------|
+| Unique tiles | 77,743 of the 1,048,576 the 20-bit tile number addresses |
+| C-ROM payload | 9.49 MiB, padded to 16 MiB across the c1 and c2 pair |
+| Command stream | 353 KiB, of which 242 KiB is keyframes and 111 KiB deltas |
+| Seek index | 4.6 KiB |
+| Keyframes | 206 |
+| Slot updates per frame | 67.5 mean, 280 peak |
+| Mean quantization error | 6.3e-4 squared Oklab, about 0.025 Oklab per pixel |
+| P-ROM used | 386,736 bytes of the 524,288 byte window |
+
+### What the numbers mean
+
+**C-ROM costs about 30 MB per minute on this content, so one 128 MiB bank holds 4.5 minutes and the 8 banks hold roughly 36 minutes.** The design-time worst case was 63 seconds per bank, so the encoder passes bought about 4.3x. A feature runtime does not fit. A 30 minute program does.
+
+**The command stream is a second constraint the design did not account for.** At 1.08 MB per minute, one C-ROM bank's worth of video needs 4.9 MB of stream, and the P-ROM window is 1 MiB. The stream needs its own banking or compression scheme before any runtime past about 8 minutes. This gates M3 more than the transport controls do.
+
+**The 20-bit tile number is not the binding limit.** 128 MiB divided by the 128 byte tile is exactly 1,048,576 tiles, so the addressing ceiling and the size ceiling are the same wall, and size is what we hit.
+
+### Lever sweep
+
+Measured on the same 20 seconds, one lever at a time against `scene-cut 0.90`.
+
+| Variant | Tiles | C-ROM MiB | Stream KiB | Mean error x1e4 |
+|---------|-------|-----------|------------|-----------------|
+| Baseline, scene-cut 0.55, no tolerance | 98,884 | 12.07 | 473 | 4.56 |
+| scene-cut 0.90 | 98,884 | 12.07 | 462 | 4.81 |
+| tolerance 0.0002 | 84,090 | 10.26 | 386 | 5.75 |
+| tolerance 0.0005 | 80,977 | 9.88 | 371 | 5.92 |
+| tolerance 0.0010 | 77,707 | 9.49 | 355 | 5.97 |
+| tolerance 0.0020 | 73,874 | 9.02 | 336 | 5.87 |
+| tolerance 0.0005, flip dedup off | 81,044 | 9.89 | 371 | 5.92 |
+| tolerance 0.0005, 64 palettes | 81,474 | 9.95 | 373 | 7.26 |
+
+### Corrections to the design
+
+- **Flip dedup is worth nothing on real footage.** It saved 67 tiles out of 81,044, under one tenth of one percent, against the design estimate of roughly 2x on symmetric content. Exact 16x16 mirror matches essentially do not occur in rendered or photographed material. It stays on because it costs nothing, but it is not a lever and it should drop to the bottom of the ranked list.
+- **The scene-cut threshold was badly wrong at 0.55.** On busy motion more than half the slots change on most frames, so 351 of 1183 frames became keyframes and the delta path was barely exercised. At 0.90 that falls to 206. Keyframe count does not change the dictionary at all, since a keyframe re-emits slots whose tiles are already interned, but it dominates the stream.
+- **240 palettes cost nothing over 64 and quantize 22 percent better.** Keep the full bank allocation.
+- **Quality beats the design-time prediction.** The plan expected Sega CD and 3DO grade output, visibly tiled on busy motion. At 15 colors per 16x16 tile drawn from 240 banks, the mean error is about 0.025 Oklab, near the just-noticeable threshold, and tiling is not obvious in stills. The user judges the motion.
+- **The encoder implements only techniques 1, 2, 5, and the keyframe cadence.** Sprite-position motion compensation, palette-only effects, layering, auto-animation, stream compression, denoise preprocessing, and motion-adaptive keyframes are all still unbuilt, so 30 MB per minute is a floor-of-effort figure rather than the best this design can do.
+
 ## Milestones
 
 Spike first, then build outward. Each milestone is verifiable in geolith.

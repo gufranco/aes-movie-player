@@ -4,3 +4,9 @@ __pycache__/
 .venv/
 *.neo
 *.zip
+assets/clip/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+build-bake.log
