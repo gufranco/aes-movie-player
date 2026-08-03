@@ -333,6 +333,10 @@ ffmpeg and ffprobe on the path, [uv](https://docs.astral.sh/uv/) for the
 Python side, Docker on non-Linux hosts, and a Neo Geo BIOS for the
 emulators. Python 3.12 or newer.
 
+## Licence
+
+GPL-3.0. See [`LICENSE`](LICENSE).
+
 ## Credits
 
 Built with [ngdevkit](https://github.com/dciabrin/ngdevkit). Verified
