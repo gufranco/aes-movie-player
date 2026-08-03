@@ -113,6 +113,10 @@ def _fix_defines() -> str:
         "rewind": "FIX_TILE_REWIND",
         "bar_empty": "FIX_TILE_BAR_EMPTY",
         "bar_filled": "FIX_TILE_BAR_FILLED",
+        "panel_top": "FIX_TILE_PANEL_TOP",
+        "bar_cap_left": "FIX_TILE_BAR_CAP_LEFT",
+        "bar_cap_right": "FIX_TILE_BAR_CAP_RIGHT",
+        "bar_knob": "FIX_TILE_BAR_KNOB",
     }
     return "\n".join(f"#define {macro} {fixtiles.GLYPHS[glyph]}" for glyph, macro in names.items())
 

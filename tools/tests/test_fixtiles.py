@@ -25,6 +25,13 @@ def decode(tile: bytes) -> list[list[int]]:
     return [[geolith_fix_pixel(tile, x, y) for x in range(8)] for y in range(8)]
 
 
+def glyph(name: str) -> list[list[int]]:
+    """The drawn pixels of one named glyph, read back out of the ROM."""
+    index = fixtiles.GLYPHS[name]
+    rom = fixtiles.build_rom()
+    return decode(rom[index * fixtiles.TILE_BYTES : (index + 1) * fixtiles.TILE_BYTES])
+
+
 class TestPacking:
     def test_a_tile_is_thirty_two_bytes(self):
         packed = fixtiles.pack_tile([[0] * 8 for _ in range(8)])
@@ -147,3 +154,45 @@ class TestPalette:
         words = fixtiles.palette_words()
 
         assert words[fixtiles.INK] > words[fixtiles.PANEL]
+
+
+class TestOverlayStyling:
+    """The overlay reads as a seek bar rather than a row of blocks."""
+
+    def test_every_glyph_index_fits_the_fix_tile_field(self):
+        assert max(fixtiles.GLYPHS.values()) < fixtiles.MAX_TILE_INDEX
+
+    def test_the_bar_pieces_all_exist(self):
+        for name in ("bar_empty", "bar_filled", "bar_cap_left", "bar_cap_right", "bar_knob"):
+            assert name in fixtiles.GLYPHS
+
+    def test_the_track_is_dimmer_than_the_played_portion(self):
+        empty = {pixel for row in glyph("bar_empty") for pixel in row}
+        filled = {pixel for row in glyph("bar_filled") for pixel in row}
+
+        assert fixtiles.DIM in empty
+        assert fixtiles.ACCENT in filled
+
+    def test_the_knob_stands_above_the_track(self):
+        knob = glyph("bar_knob")
+
+        assert any(fixtiles.INK in row for row in knob)
+
+    def test_the_caps_leave_their_outer_edge_clear(self):
+        left = glyph("bar_cap_left")
+        right = glyph("bar_cap_right")
+
+        assert all(row[0] != fixtiles.DIM for row in left)
+        assert all(row[-1] != fixtiles.DIM for row in right)
+
+    def test_the_panel_top_carries_a_highlight_line(self):
+        top = glyph("panel_top")
+
+        assert all(pixel == fixtiles.EDGE for pixel in top[0])
+        assert all(pixel == fixtiles.PANEL for pixel in top[1])
+
+    def test_the_palette_defines_every_shade_it_uses(self):
+        words = fixtiles.palette_words()
+
+        for slot in (fixtiles.INK, fixtiles.PANEL, fixtiles.ACCENT, fixtiles.DIM, fixtiles.EDGE):
+            assert words[slot] != 0

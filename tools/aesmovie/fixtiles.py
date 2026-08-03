@@ -29,12 +29,23 @@ TRANSPARENT: Final = 0
 INK: Final = 1
 PANEL: Final = 2
 ACCENT: Final = 3
+DIM: Final = 4
+EDGE: Final = 5
 
 _INK_COLOR: Final = (31, 31, 31)
-_PANEL_COLOR: Final = (2, 2, 5)
-_ACCENT_COLOR: Final = (31, 24, 4)
+_PANEL_COLOR: Final = (1, 1, 3)
+_ACCENT_COLOR: Final = (31, 18, 2)
+_DIM_COLOR: Final = (13, 13, 15)
+_EDGE_COLOR: Final = (7, 7, 9)
 
-_PIXEL_CODES: Final = {".": PANEL, "#": INK, "*": ACCENT, " ": TRANSPARENT}
+_PIXEL_CODES: Final = {
+    ".": PANEL,
+    "#": INK,
+    "*": ACCENT,
+    "-": DIM,
+    "=": EDGE,
+    " ": TRANSPARENT,
+}
 
 _ART: Final[dict[str, tuple[str, ...]]] = {
     "blank": ("        ",) * 8,
@@ -161,12 +172,12 @@ _ART: Final[dict[str, tuple[str, ...]]] = {
     ),
     "play": (
         "........",
-        "..#.....",
-        "..###...",
-        "..#####.",
-        "..#####.",
-        "..###...",
-        "..#.....",
+        "..##....",
+        "..####..",
+        "..######",
+        "..######",
+        "..####..",
+        "..##....",
         "........",
     ),
     "pause": (
@@ -181,30 +192,40 @@ _ART: Final[dict[str, tuple[str, ...]]] = {
     ),
     "forward": (
         "........",
-        ".#...#..",
-        ".###.###",
+        ".##..##.",
+        ".####.##",
         ".#######",
         ".#######",
-        ".###.###",
-        ".#...#..",
+        ".####.##",
+        ".##..##.",
         "........",
     ),
     "rewind": (
         "........",
-        "..#...#.",
-        "###.###.",
+        ".##..##.",
+        "##.####.",
         "#######.",
         "#######.",
-        "###.###.",
-        "..#...#.",
+        "##.####.",
+        ".##..##.",
+        "........",
+    ),
+    "panel_top": (
+        "========",
+        "........",
+        "........",
+        "........",
+        "........",
+        "........",
+        "........",
         "........",
     ),
     "bar_empty": (
         "........",
         "........",
         "........",
-        "..CCCC..",
-        "..CCCC..",
+        "--------",
+        "--------",
         "........",
         "........",
         "........",
@@ -212,10 +233,40 @@ _ART: Final[dict[str, tuple[str, ...]]] = {
     "bar_filled": (
         "........",
         "........",
-        "..****..",
-        ".******.",
-        ".******.",
-        "..****..",
+        "........",
+        "********",
+        "********",
+        "........",
+        "........",
+        "........",
+    ),
+    "bar_cap_left": (
+        "........",
+        "........",
+        "........",
+        "...-----",
+        "...-----",
+        "........",
+        "........",
+        "........",
+    ),
+    "bar_cap_right": (
+        "........",
+        "........",
+        "........",
+        "-----...",
+        "-----...",
+        "........",
+        "........",
+        "........",
+    ),
+    "bar_knob": (
+        "........",
+        "........",
+        "..####..",
+        ".######.",
+        ".######.",
+        "..####..",
         "........",
         "........",
     ),
@@ -240,6 +291,10 @@ GLYPH_ORDER: Final = (
     "rewind",
     "bar_empty",
     "bar_filled",
+    "panel_top",
+    "bar_cap_left",
+    "bar_cap_right",
+    "bar_knob",
 )
 
 GLYPHS: Final[dict[str, int]] = {name: index for index, name in enumerate(GLYPH_ORDER)}
@@ -282,4 +337,6 @@ def palette_words() -> list[int]:
     words[INK] = pack_palette_word(*_INK_COLOR)
     words[PANEL] = pack_palette_word(*_PANEL_COLOR)
     words[ACCENT] = pack_palette_word(*_ACCENT_COLOR)
+    words[DIM] = pack_palette_word(*_DIM_COLOR)
+    words[EDGE] = pack_palette_word(*_EDGE_COLOR)
     return words
