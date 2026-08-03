@@ -349,6 +349,51 @@ at a hold of 4, 41,989 tiles with a blend width of 8 against 39,644
 without. The only thing it bought was judder concealment, which now has
 to be paid for by choosing a frame hold the viewer accepts unaided.
 
+### Rate control, and why the first attempt failed
+
+A tier is chosen from a sample, and a sample cannot know that the third
+act is busier than the first. Without a controller the dictionary simply
+runs out partway through and every remaining slot freezes, wrecking the
+end of the film rather than costing a little quality across all of it.
+
+The first controller corrected from cumulative overshoot: compare tiles
+used against the budget pro-rated by progress, and scale the threshold
+by the ratio. It held the budget, because the dictionary is capped at
+the budget outright, but it degraded like a cliff. At 80% of the tiles
+the content wanted, error went from 7.01 to 95.32.
+
+The cause is that a per-frame calculation from cumulative overshoot
+responds far too late and far too weakly. Overshoot sits near 1.0 for a
+long time, so the threshold barely moves, and by the time the running
+total is visibly over, the thresholds that would recover the deficit are
+ones the formula never reaches. Peak threshold got to 0.003 against a
+median drift around 0.4, so it never bit at all and the encode simply
+ran into the cap.
+
+Replacing it with an integral controller fixed it. It compares the
+recent rate of tile creation against the rate the remaining budget
+affords, and holds a multiplier that ratchets up while spending is too
+fast and decays while it is not. Because the multiplier persists between
+frames it keeps climbing until it actually bites, which is the property
+the per-frame form could not have.
+
+| Budget | Cumulative form | Integral controller |
+|---|---|---|
+| 100% | 7.07 | 8.50 |
+| 80% | 95.32 | 11.16 |
+| 60% | 117.91 | 27.80 |
+| 40% | 156.93 | 45.35 |
+| 25% | 286.27 | 83.46 |
+
+The integral form also never reaches the cap at any budget, where the
+first one hit it every time. It lands slightly under budget, 68,200 of
+78,497 at the full figure, so a little quality is left unspent. That is
+the safe direction and worth keeping until a long bake proves otherwise.
+
+The cap itself stays. No threshold can slow some content down, so the
+guarantee has to be structural, and the controller's job is to make the
+cap unreachable rather than to enforce it.
+
 ### Blur-free profiles, 45 s of real footage
 
 | Profile | Effective fps | Tiles | Max runtime |

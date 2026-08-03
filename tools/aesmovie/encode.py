@@ -54,6 +54,9 @@ class EncodeOptions:
     motion_masking: float = 0.0
     chroma_weight: float = palettes.DEFAULT_CHROMA_WEIGHT
     scene_cut_floor: float = 0.01
+    tile_budget: int = 0
+    rate_control_gain: float = 4.0
+    max_tolerance_scale: float = 4096.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +76,8 @@ class EncodeStats:
     mean_updates: float
     mean_error: float
     displayed_error: float
+    peak_tolerance: float
+    budget_exceeded: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +108,7 @@ def _masked_threshold(
     previous: npt.NDArray[np.uint16] | None,
     targets: npt.NDArray[np.bool_],
     options: EncodeOptions,
+    tolerance: float,
 ) -> npt.NDArray[np.float32] | float:
     """Per-slot error budget, raised where the picture is moving.
 
@@ -121,9 +127,9 @@ def _masked_threshold(
     hidden by movement never outlives the movement that hid it.
     """
     if options.motion_masking <= 0.0 or previous is None:
-        return options.tolerance
+        return tolerance
     moved = _movement(current, previous, targets, options.chroma_weight)
-    return options.tolerance + options.motion_masking * moved
+    return tolerance + options.motion_masking * moved
 
 
 def _movement(
@@ -138,6 +144,80 @@ def _movement(
         ((grid[current[targets]] - grid[previous[targets]]) ** 2).sum(axis=3).mean(axis=(1, 2))
     )
     return moved
+
+
+class _RateController:
+    """Keeps tile spending on pace so the movie fits the cartridge.
+
+    A tier is chosen from a sample, and a sample cannot know that the
+    third act is busier than the first. Left alone the dictionary runs
+    out partway through and every remaining slot freezes, which wrecks
+    the end of the film instead of costing a little quality across all
+    of it.
+
+    Correcting from cumulative overshoot proved far too slow. By the
+    time the running total is visibly over, the only thresholds that
+    would still recover the deficit are ones this controller would take
+    hundreds of frames to reach, so it arrives after the dictionary has
+    already hit its cap. This instead compares the recent rate of tile
+    creation against the rate the remaining budget affords, and holds a
+    multiplier that ratchets up while spending is too fast and decays
+    while it is not. Because the multiplier persists between frames it
+    keeps climbing until it actually bites, which is the property a
+    per-frame calculation cannot have.
+
+    The multiplier never falls below one, so the tier's own threshold is
+    a floor and the controller can only tighten.
+    """
+
+    _SMOOTHING: Final = 0.05
+    _RAMP_LIMIT: Final = 1.25
+    _DECAY: Final = 0.98
+    _SLACK: Final = 0.8
+
+    def __init__(self, options: EncodeOptions) -> None:
+        self._budget = options.tile_budget
+        self._base = options.tolerance
+        self._max_scale = options.max_tolerance_scale
+        self._scale = 1.0
+        self._previous_tiles = 0
+        self._rate = 0.0
+
+    def tolerance(self, tiles_used: int, index: int, total_frames: int) -> float:
+        """The error budget for this frame."""
+        if self._budget <= 0 or total_frames <= 0:
+            return self._base
+        added = tiles_used - self._previous_tiles
+        self._previous_tiles = tiles_used
+        self._rate += (added - self._rate) * self._SMOOTHING
+
+        remaining_frames = total_frames - index
+        remaining_budget = self._budget - tiles_used
+        if remaining_frames <= 0:
+            return self._base * self._scale
+        affordable = max(0.0, remaining_budget) / remaining_frames
+
+        if affordable <= 0.0:
+            self._scale = self._max_scale
+        elif self._rate > affordable:
+            ramp = min(self._rate / affordable, self._RAMP_LIMIT)
+            self._scale = min(self._max_scale, self._scale * ramp)
+        elif self._rate < affordable * self._SLACK:
+            self._scale = max(1.0, self._scale * self._DECAY)
+        return self._base * self._scale
+
+
+def _new_dictionary(options: EncodeOptions) -> TileDictionary:
+    """The dictionary this encode may fill, capped by any tile budget.
+
+    Capping here rather than in the controller is what makes the budget
+    a guarantee: no threshold can be raised high enough to slow some
+    content down, but a dictionary that refuses to grow always holds.
+    """
+    capacity = options.dictionary_capacity
+    if options.tile_budget > 0:
+        capacity = min(capacity, options.tile_budget)
+    return TileDictionary(allow_flip=options.allow_flip, capacity=capacity)
 
 
 def _is_scene_cut(
@@ -180,6 +260,7 @@ def _select_targets(
     screen: _Screen,
     keyframe: bool,
     options: EncodeOptions,
+    tolerance: float,
 ) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.bool_]]:
     """Which slots to redraw this frame, and which stay owed a redraw.
 
@@ -198,9 +279,9 @@ def _select_targets(
             np.zeros((GRID_ROWS, GRID_COLS), dtype=bool),
         )
     targets = changed | pending
-    if options.tolerance <= 0.0 or not targets.any():
+    if tolerance <= 0.0 or not targets.any():
         return targets, np.zeros_like(targets)
-    threshold = _masked_threshold(current, previous, targets, options)
+    threshold = _masked_threshold(current, previous, targets, options, tolerance)
     keep = np.zeros_like(targets)
     keep[targets] = screen.drift(current, targets) > threshold
     return keep, targets & ~keep
@@ -235,6 +316,12 @@ class _Totals:
     error_pixels: int = 0
     displayed_error_total: float = 0.0
     displayed_frames: int = 0
+    peak_tolerance: float = 0.0
+
+    def track_tolerance(self, tolerance: float) -> float:
+        """Record the highest budget the controller had to reach."""
+        self.peak_tolerance = max(self.peak_tolerance, tolerance)
+        return tolerance
 
 
 def _build_stats(
@@ -243,6 +330,7 @@ def _build_stats(
     dictionary: TileDictionary,
     updates_per_frame: npt.NDArray[np.int32],
     totals: _Totals,
+    budget: int,
 ) -> EncodeStats:
     tile_count = len(dictionary)
     return EncodeStats(
@@ -265,6 +353,8 @@ def _build_stats(
             if totals.displayed_frames
             else 0.0
         ),
+        peak_tolerance=totals.peak_tolerance,
+        budget_exceeded=bool(budget > 0 and tile_count >= budget),
     )
 
 
@@ -386,7 +476,7 @@ def encode_stream(
         chroma_weight=options.chroma_weight,
     )
     assigner = palettes.PaletteAssigner(palette_set, candidates=options.candidates)
-    dictionary = TileDictionary(allow_flip=options.allow_flip, capacity=options.dictionary_capacity)
+    dictionary = _new_dictionary(options)
     screen = _Screen(palette_set)
     movie = stream.MovieStream()
 
@@ -396,7 +486,7 @@ def encode_stream(
         else np.zeros((0, FRAME_HEIGHT, FRAME_WIDTH), dtype=np.uint16)
     )
     updates_per_frame = np.zeros(total_frames, dtype=np.int32)
-    totals = _Totals()
+    totals, controller = _Totals(), _RateController(options)
     last_keyframe = -options.keyframe_interval
 
     previous: npt.NDArray[np.uint16] | None = None
@@ -420,6 +510,9 @@ def encode_stream(
 
         if keyframe:
             last_keyframe = index
+        tolerance = totals.track_tolerance(
+            controller.tolerance(len(dictionary), index, total_frames)
+        )
         targets, pending = _select_targets(
             current,
             previous_source,
@@ -428,6 +521,7 @@ def encode_stream(
             screen=screen,
             keyframe=keyframe,
             options=options,
+            tolerance=tolerance,
         )
 
         updates: list[stream.SlotUpdate] = []
@@ -460,6 +554,7 @@ def encode_stream(
         dictionary=dictionary,
         updates_per_frame=updates_per_frame,
         totals=totals,
+        budget=options.tile_budget,
     )
 
     return EncodeResult(

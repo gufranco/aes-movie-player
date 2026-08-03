@@ -487,3 +487,59 @@ class TestDisplayedError:
         result = encode.encode(clip, options())
 
         assert result.stats.displayed_error == pytest.approx(0.0, abs=1e-6)
+
+
+class TestRateControl:
+    def busy(self, count: int) -> np.ndarray:
+        """Content that mints new tiles on every frame."""
+        rng = np.random.default_rng(11)
+        return rng.integers(0, 256, size=(count, HEIGHT, WIDTH, 3), dtype=np.uint8)
+
+    def test_no_budget_leaves_the_encode_untouched(self):
+        clip = self.busy(6)
+
+        free = encode.encode(clip, options())
+        zeroed = encode.encode(clip, options(tile_budget=0))
+
+        assert len(free.dictionary) == len(zeroed.dictionary)
+
+    def test_a_tight_budget_is_respected(self):
+        clip = self.busy(10)
+
+        free = encode.encode(clip, options(keyframe_interval=1000))
+        budget = len(free.dictionary) // 2
+        held = encode.encode(clip, options(keyframe_interval=1000, tile_budget=budget))
+
+        assert len(held.dictionary) <= budget
+
+    def test_a_generous_budget_does_not_degrade_the_picture(self):
+        clip = self.busy(6)
+
+        free = encode.encode(clip, options())
+        roomy = encode.encode(clip, options(tile_budget=1 << 20))
+
+        assert len(roomy.dictionary) == len(free.dictionary)
+
+    def test_it_reports_the_tolerance_it_had_to_reach(self):
+        clip = self.busy(10)
+
+        free = encode.encode(clip, options(keyframe_interval=1000))
+        held = encode.encode(
+            clip, options(keyframe_interval=1000, tile_budget=len(free.dictionary) // 2)
+        )
+
+        assert held.stats.peak_tolerance > options().tolerance
+
+    def test_an_untouched_budget_reports_the_base_tolerance(self):
+        clip = self.busy(6)
+
+        result = encode.encode(clip, options(tile_budget=1 << 20))
+
+        assert result.stats.peak_tolerance == pytest.approx(options().tolerance)
+
+    def test_a_budget_it_cannot_meet_is_reported(self):
+        clip = self.busy(10)
+
+        result = encode.encode(clip, options(keyframe_interval=1, tile_budget=10))
+
+        assert result.stats.budget_exceeded

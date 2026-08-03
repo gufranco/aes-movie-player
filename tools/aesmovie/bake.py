@@ -176,6 +176,7 @@ class BakeRequest:
     motion_masking: float = 0.0
     chroma_weight: float = 1.0
     scene_cut_floor: float = 0.01
+    tile_budget: int = 0
     audio_rate_hz: float = 22050.0
     audio: bool = True
 
@@ -203,6 +204,7 @@ class BakeOutcome:
             "motion_masking": self.request.motion_masking,
             "chroma_weight": self.request.chroma_weight,
             "scene_cut_floor": self.request.scene_cut_floor,
+            "tile_budget": self.request.tile_budget,
             "tile_count": stats.tile_count,
             "dictionary_full": stats.dictionary_full,
             "crom_payload_bytes": stats.crom_payload_bytes,
@@ -217,6 +219,8 @@ class BakeOutcome:
             "max_updates": stats.max_updates,
             "mean_updates": round(stats.mean_updates, 2),
             "mean_error": stats.mean_error,
+            "peak_tolerance": stats.peak_tolerance,
+            "budget_exceeded": stats.budget_exceeded,
             "displayed_error": stats.displayed_error,
             "projected_crom_bytes_per_minute": round(crom_per_minute),
             "projected_stream_bytes_per_minute": round(stream_per_minute),
@@ -461,6 +465,7 @@ def run(request: BakeRequest) -> BakeOutcome:
             motion_masking=request.motion_masking,
             chroma_weight=request.chroma_weight,
             scene_cut_floor=request.scene_cut_floor,
+            tile_budget=request.tile_budget,
             collect_rendered=False,
         ),
         sample_tiles=sample_tiles,
@@ -533,6 +538,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--motion-masking", type=float, default=0.0)
     parser.add_argument("--chroma-weight", type=float, default=None)
     parser.add_argument("--scene-cut-floor", type=float, default=0.01)
+    parser.add_argument("--tile-budget", type=int, default=None)
     parser.add_argument("--palette-count", type=int, default=240)
     parser.add_argument("--base-bank", type=int, default=16)
     parser.add_argument("--keyframe-interval", type=int, default=90)
@@ -631,6 +637,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     tier = _resolve_quality(args)
     frame_hold = _resolve_frame_hold(args, tier)
+    tile_budget = quality.CROM_TILES if tier is not None else None
     audio_rate = args.audio_rate
     if audio_rate is None:
         audio_rate = quality.audio_hz_for(args.duration / quality.SECONDS_PER_MINUTE)
@@ -647,6 +654,7 @@ def main(argv: list[str] | None = None) -> int:
             motion_masking=args.motion_masking,
             chroma_weight=_pick(args.chroma_weight, tier.chroma_weight if tier else None, 1.0),
             scene_cut_floor=args.scene_cut_floor,
+            tile_budget=_pick(args.tile_budget, tile_budget, 0),
             palette_count=args.palette_count,
             base_bank=args.base_bank,
             keyframe_interval=args.keyframe_interval,
