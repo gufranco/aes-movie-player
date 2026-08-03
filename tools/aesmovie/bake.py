@@ -584,14 +584,11 @@ def _resolve_quality(args: argparse.Namespace) -> quality.Tier | None:
         ),
         file=sys.stderr,
     )
+    shortfall = quality.shortfall_message(minutes, rate)
+    if shortfall is not None:
+        raise SystemExit(shortfall)
     chosen = quality.select(minutes, rate)
-    if chosen is None:
-        cheapest = quality.survey(minutes, rate)[-1]
-        msg = (
-            f"this source does not fit at any quality tier; trim "
-            f"{quality.clock(cheapest.trim_minutes)} and bake again"
-        )
-        raise SystemExit(msg)
+    assert chosen is not None
     return chosen.tier
 
 

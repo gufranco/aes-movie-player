@@ -21,6 +21,7 @@ supplies per source.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Final
 
@@ -125,8 +126,18 @@ class Fit:
 
     @property
     def trim_minutes(self) -> float:
-        """Runtime that would have to come out to reach this tier."""
-        return max(0.0, -self.spare_minutes)
+        """Runtime that would have to come out to reach this tier.
+
+        Rounded up to the next whole second. The exact shortfall lands on
+        the boundary, where floating point can leave a source a
+        fraction over after trimming by precisely the figure it was
+        given, and advice that does not quite work is worse than none.
+        Seconds are also the unit the figure is displayed in.
+        """
+        shortfall = -self.spare_minutes
+        if shortfall <= 0.0:
+            return 0.0
+        return math.ceil(shortfall * SECONDS_PER_MINUTE) / SECONDS_PER_MINUTE
 
 
 def clock(minutes: float) -> str:
@@ -259,6 +270,22 @@ def format_plan(
 def survey(minutes: float, reference_rate: float) -> list[Fit]:
     """Every tier measured against one runtime, best quality first."""
     return [Fit(tier, minutes, max_minutes(tier, reference_rate)) for tier in LADDER]
+
+
+def shortfall_message(minutes: float, reference_rate: float) -> str | None:
+    """Why a source cannot be baked at all, or None when some tier fits.
+
+    Kept apart from the command line so the decision, and the number the
+    reader is asked to act on, can be checked without a source long
+    enough to actually overrun a cartridge.
+    """
+    if select(minutes, reference_rate) is not None:
+        return None
+    cheapest = survey(minutes, reference_rate)[-1]
+    return (
+        f"this source does not fit at any quality tier; trim "
+        f"{clock(cheapest.trim_minutes)} and bake again"
+    )
 
 
 def select(minutes: float, reference_rate: float) -> Fit | None:

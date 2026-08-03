@@ -95,3 +95,17 @@ class TestSampledRange:
         )
 
         assert rate > 0.0
+
+
+class TestSampleWindowValidation:
+    def test_a_non_positive_duration_is_rejected(self):
+        with pytest.raises(ValueError, match="duration must be positive"):
+            calibrate.sample_windows(0.0, count=2, seconds=1.0)
+
+    def test_a_count_below_one_is_rejected(self):
+        with pytest.raises(ValueError, match="at least one"):
+            calibrate.sample_windows(10.0, count=0, seconds=1.0)
+
+    def test_non_positive_window_seconds_are_rejected(self):
+        with pytest.raises(ValueError, match="seconds must be positive"):
+            calibrate.sample_windows(10.0, count=2, seconds=0.0)

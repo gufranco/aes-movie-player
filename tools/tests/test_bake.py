@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import subprocess
@@ -8,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from aesmovie import adpcmb, bake, stream
+from aesmovie import adpcmb, bake, quality, stream
 from aesmovie import frames as frames_mod
 
 _spec = importlib.util.spec_from_file_location(
@@ -584,3 +585,41 @@ class TestSampleThinning:
         thinned = bake._thin_sample(tiles, 4)
 
         assert thinned.shape == (bake.MAX_SAMPLE_TILES, 16, 16)
+
+
+class TestQualityResolution:
+    def args(self, source, **extra):
+        base = {
+            "quality": None,
+            "source": source,
+            "start": 0.0,
+            "duration": 1.0,
+            "fit": "fill",
+            "seed": 0,
+        }
+        base.update(extra)
+        return argparse.Namespace(**base)
+
+    def test_no_quality_flag_selects_no_tier(self, synthetic_clip):
+        assert bake._resolve_quality(self.args(synthetic_clip)) is None
+
+    def test_a_named_tier_is_returned(self, synthetic_clip):
+        tier = bake._resolve_quality(self.args(synthetic_clip, quality="long"))
+
+        assert tier is not None
+        assert tier.name == "long"
+
+    def test_an_unknown_tier_is_rejected(self, synthetic_clip):
+        with pytest.raises(ValueError, match="unknown quality tier"):
+            bake._resolve_quality(self.args(synthetic_clip, quality="cinematic"))
+
+    def test_auto_measures_the_source_and_picks_a_tier(self, synthetic_clip):
+        tier = bake._resolve_quality(self.args(synthetic_clip, quality="auto"))
+
+        assert tier is not None
+        assert tier.name in {row.name for row in quality.LADDER}
+
+    def test_auto_reports_the_ladder_before_baking(self, synthetic_clip, capsys):
+        bake._resolve_quality(self.args(synthetic_clip, quality="auto"))
+
+        assert "Quality ladder" in capsys.readouterr().err

@@ -171,3 +171,23 @@ class TestPlanReport:
 
         assert "C-ROM" in text
         assert "audio" in text
+
+
+class TestShortfallMessage:
+    def test_a_source_that_fits_has_no_message(self):
+        assert quality.shortfall_message(1.0, 100_000.0) is None
+
+    def test_a_source_beyond_every_tier_is_told_how_much_to_cut(self):
+        message = quality.shortfall_message(600.0, 100_000.0)
+
+        assert message is not None
+        assert "does not fit" in message
+        assert "trim" in message
+
+    def test_the_amount_named_is_enough_to_make_it_fit(self):
+        minutes = 600.0
+        cheapest = quality.survey(minutes, 100_000.0)[-1]
+
+        trimmed = minutes - cheapest.trim_minutes
+
+        assert quality.select(trimmed, 100_000.0) is not None
