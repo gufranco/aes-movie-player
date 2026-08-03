@@ -4,140 +4,338 @@ Play a real movie on a stock Neo Geo AES. Full screen at 320x224, colour,
 mono soundtrack, and a working transport: play, pause, fast forward at 2x,
 5x and 10x, rewind, and seek.
 
-The console decodes nothing at runtime. An offline baker turns a video file
-into cartridge ROM images, and the on-cart player streams pre-baked sprite
-tile-number updates to the LSPC, plays a pre-encoded ADPCM-B soundtrack, and
-drives a fix-layer menu. Every expensive decision is made once, in Python,
-before the cartridge exists.
+The console has no video decoder, no framebuffer, and no scaler. It draws
+hardware sprites and that is all. So the movie is not decoded on the
+console at all. An offline baker turns a video file into cartridge ROM
+images, and the on-cart player does nothing at runtime but push pre-computed
+tile numbers into sprite control blocks once per vblank.
+
+A ten minute movie fits in a 139 MB cartridge, plays at 14.8 fps with sound,
+and reproduces bit-exactly what the baker predicted.
+
+## Contents
+
+- [How it works](#how-it-works)
+- [Hardware ceilings](#hardware-ceilings)
+- [The quality system](#the-quality-system)
+- [Rate control](#rate-control)
+- [Colour](#colour)
+- [Usage](#usage)
+- [Verification](#verification)
+- [What did not work](#what-did-not-work)
+- [Repository layout](#repository-layout)
 
 ## How it works
 
-The picture is a 20x14 grid of hardware sprite tiles, 280 slots of 16x16
-pixels. Every distinct tile the movie needs is interned once into a global
-dictionary in character ROM, and each frame is a short list of "slot 137 now
-shows tile 90412". A frame that changes nothing costs two bytes.
+The screen is a fixed grid of 20 by 14 hardware sprite tiles, 280 slots of
+16x16 pixels covering the 320x224 raster. Every distinct tile the whole
+movie needs is interned once into a global dictionary in character ROM.
+A frame is then just a list of assignments: slot 137 now shows tile 90412.
 
-Keyframes rewrite all 280 slots and act as seek targets, so the transport
-can jump anywhere. Between them, a slot is only rewritten when its content
-actually changed and the change is large enough to see.
+```mermaid
+flowchart LR
+    A[source video] --> B[decode to 320x224<br/>at the vblank rate]
+    B --> C[quantize to<br/>Neo Geo colour]
+    C --> D[fit 240 palettes<br/>of 15 colours]
+    D --> E[intern 16x16 tiles<br/>into one dictionary]
+    E --> F[C-ROM<br/>tile dictionary]
+    E --> G[command stream<br/>keyframes + deltas]
+    A --> H[ADPCM-B encode] --> I[V-ROM soundtrack]
+    F --> J[cartridge]
+    G --> J
+    I --> J
+```
 
-There is no framebuffer, so there are no residuals. Every correction is a
-pointer to a tile that already exists, which means picture quality is
-dictionary richness is character ROM.
+At runtime the player reads the next frame's commands and writes them
+straight to sprite control block 1. There is no decompression step, because
+a tile number *is* the decoded form.
 
-## Hard ceilings
+```mermaid
+flowchart LR
+    A[vblank] --> B{transport state}
+    B -->|playing| C[read next frame<br/>from banked P-ROM]
+    B -->|seeking| D[jump to nearest<br/>keyframe via index]
+    C --> E[write tile numbers<br/>to SCB1]
+    D --> E
+    E --> F[re-point ADPCM-B<br/>to matching page]
+```
+
+**A frame that changes nothing costs two bytes.** A 24 fps source shown on a
+59.185 Hz raster repeats each frame about 2.47 times, and every repeat is
+free. Over ten minutes the stream averages 16.7 slot updates per frame out
+of 280.
+
+**Keyframes rewrite all 280 slots** and act as seek targets. The transport
+can jump anywhere by finding the nearest keyframe in an index and replaying
+from there. A ten minute movie carries 716 of them.
+
+**There are no residuals.** With no framebuffer, a correction cannot add a
+difference to what is on screen. It can only point a slot at some tile that
+already exists in the dictionary. Picture quality is therefore dictionary
+richness, and dictionary richness is character ROM. That single fact shapes
+every design decision below.
+
+## Hardware ceilings
+
+Read from the source of two independent emulators rather than from prose.
 
 | Resource | Ceiling | Consequence |
 |---|---|---|
-| Character ROM | 20-bit tile number, 1,048,576 tiles, 128 MiB | Binds first at every quality tier. There is no bank register and there cannot be one, since 2^20 tiles at 128 bytes is exactly the 128 MiB the number addresses |
-| Program ROM | 3-bit bank latch, 8 banks of 1 MiB | Carries the command stream, and keeps around half its space spare throughout |
-| ADPCM-B voice ROM | 16 MiB | About 25 minutes at 22 kHz. Only constrains anything past that |
-| Sprites per scanline | 96 | The 20-column grid uses 20 |
+| Character ROM | 20-bit tile number, 1,048,576 tiles, 128 MiB | The binding constraint at every quality tier |
+| Program ROM | 3-bit bank latch, 8 banks of 1 MiB | Command stream. Used 3.0 MB for ten minutes, never close |
+| ADPCM-B voice ROM | 16 MiB, one continuous sample | About 25 minutes at 22 kHz. Only binds past that |
+| Sprites per scanline | 96 | The grid uses 20 |
+| Palettes | 256 banks of 16 colours, index 0 transparent | 240 for video, 16 reserved for the menu |
+| Watchdog | about 0.13 seconds | Bounds any initialisation loop |
 
-## Quality tiers
+**There is no character-ROM bankswitching, and there cannot be.** Neither
+geolith nor MAME implements it on any board, including every bootleg mapper
+MAME carries, and the arithmetic forbids it: 2^20 tiles at 128 bytes each is
+exactly the 128 MiB the tile number addresses. 128 MiB is an absolute
+ceiling, not a window. An early design assumed 8 banks of it and was wrong.
+
+## The quality system
 
 Tile cost is a property of the content, not of the running time. Dense
-animation can cost several times what a dialogue scene costs, so the baker
-measures the source itself rather than guessing from duration.
-
-Ask what a source can become before committing to a bake:
+animation can cost several times what a dialogue scene costs, so a ladder
+indexed by duration alone would over-compress easy sources and
+under-compress hard ones. The baker measures the source instead.
 
 ```bash
 uv --project tools run python -m aesmovie.plan --source film.mkv
 ```
 
-It samples the source, measures the real tile rate, and prints every tier
-with the runtime it holds for that source, how far each one overruns, which
-one it would pick, and exactly how much to trim to reach the next tier up.
-Calibration takes under a minute where a bake takes hours, so the decision
-comes before the cost.
+```
+Source
+  film.mkv
+  9:56 runtime, 1280x720, 24.00 fps, audio present
 
-| Tier | Picture | Effective fps |
-|---|---|---|
-| archival | every frame, full colour precision | 59.2 |
-| high | every frame, slightly cheaper colour | 59.2 |
-| standard | every frame, cheaper colour | 59.2 |
-| extended | cheaper colour | 19.7 |
-| long | mild denoise | 14.8 |
-| maximum | visible softening | 11.8 |
-| extreme | heavy softening | 9.9 |
+Calibration
+  measured 197,423 tiles per minute at 'standard'
 
-The ladder spans roughly seven times the runtime end to end. The levers are
-chroma weighting, which spends less precision on colour than on luminance
-because vision resolves luminance far more finely, frame holding, denoise,
-and the redraw threshold.
+Quality ladder for this source
+  tier      picture                                  fps     holds          verdict
+  archival  every frame, full colour precision      59.2      3:10     over by 7:01
+  high      every frame, slightly cheaper colour    59.2      3:30     over by 6:42
+  standard  every frame, cheaper colour             59.2      5:19     over by 5:03
+  extended  20 fps, cheaper colour                  19.7      7:45     over by 2:49
+  long      15 fps, mild denoise                    14.8     11:24  fits, 0:33 spare
+  maximum   12 fps, visible softening               11.8     15:51  fits, 4:39 spare
+  extreme   10 fps, heavy softening                  9.9     22:19 fits, 10:36 spare
 
-Calibration is deliberately pessimistic. Each sample window boundary looks
-like a cut and earns a keyframe a real bake would not spend, and a short
+Selected: long
+  holds 11:24, uses 9:56, 0:33 spare
+
+To reach 'extended' instead (20 fps, cheaper colour):
+  Trim 2:49, bringing the source to 7:07 or shorter.
+
+Cartridge budget at this tier
+  C-ROM    111.6 MiB of 128.0 MiB     87%   913,858 tiles
+  audio      6.3 MiB of 16.0 MiB      39%   at 22.1 kHz
+```
+
+Every tier is listed whether it fits or not, with the exact overshoot, so
+trimming the source stays a decision made with the numbers in view.
+Calibration takes under a minute where a bake takes hours.
+
+The levers, in order of how much they cost perceptually:
+
+| Lever | What it does |
+|---|---|
+| Chroma weight | Scales the `a` and `b` axes of the shared Oklab metric, so colour error is charged at a fraction of the rate luma error is. Vision resolves luminance far more finely |
+| Frame hold | Shows each frame for N refreshes. Only worth anything when the effective rate drops below the source rate |
+| Denoise | Removes grain the dictionary would otherwise have to store |
+| Redraw threshold | How far the picture may drift before a slot is rewritten |
+
+Chroma weighting is the direct descendant of what Angel Studios did to fit
+Resident Evil 2's video into 24 MiB on the Nintendo 64, quartering the
+horizontal chroma resolution outright. There is no chroma plane to subsample
+here, since a tile is a palette index rather than a Y/Cb/Cr triple, so the
+equivalent lever is the distance metric every stage already shares. Weighting
+it once moves palette fitting, tile assignment, and redraw decisions onto a
+luma-first metric together.
+
+**Calibration is deliberately pessimistic.** Each sample window boundary
+looks like a cut and earns a keyframe a real bake never spends, and a short
 sample cannot see the dictionary reuse that accumulates across a whole
-feature. On a ten minute source the estimate came in around 1.6 times the
-tiles the full bake actually used, so a selected tier has room rather than a
-shortfall.
+feature. On a ten minute source the estimate came in about 1.6 times the
+tiles the full bake actually used. The direction is safe; the magnitude
+currently costs roughly a tier of quality on a feature.
 
-## Baking
+## Rate control
+
+A tier is chosen from a sample, and a sample cannot know that the third act
+is busier than the first. Left alone the dictionary runs out partway through
+and every remaining slot freezes, which ruins the end of a film rather than
+costing a little quality across all of it.
+
+Two mechanisms, deliberately separate:
+
+- **The dictionary is capped at the budget.** No threshold can slow some
+  content down, so the guarantee has to be structural.
+- **A controller keeps the cap out of reach.** It compares the recent rate of
+  tile creation against the rate the remaining budget affords, and holds a
+  multiplier that ratchets up while spending runs hot and decays while it
+  does not. The multiplier never falls below one, so the tier's own
+  threshold is a floor and the controller can only tighten.
+
+Correcting from cumulative overshoot was tried first and degrades like a
+cliff, because overshoot sits near 1.0 for a long time and by the time the
+running total is visibly over, the thresholds that would recover the deficit
+are ones the formula never reaches. Measured against the tiles the content
+wanted:
+
+| Budget | Cumulative form | Integral controller |
+|---|---|---|
+| 100% | 7.07 | 8.50 |
+| 80% | 95.32 | 11.16 |
+| 60% | 117.91 | 27.80 |
+| 40% | 156.93 | 45.35 |
+| 25% | 286.27 | 83.46 |
+
+The integral form also never reaches the cap at any budget, where the first
+one hit it every time.
+
+## Colour
+
+The Neo Geo colour word is `|D0|R1|G1|B1|R5R4R3R2|G5G4G3G2|B5B4B3B2|`: five
+independent bits per channel plus `D0`, a sixth bit shared across all three.
+That is 15-bit colour, not the 12-bit a four-bits-per-channel reading gives.
+
+Two digital-to-analog models exist. One scales the six-bit level linearly;
+the other models the board's resistor ladder of 3900, 2200, 1000, 470 and
+220 ohms per channel, which reaches true black where the linear model
+bottoms out. The baker targets the resistor model, because it is the one
+that models the hardware.
+
+Distance is measured in Oklab throughout, so palette fitting, tile
+assignment, redraw decisions, and the fidelity metric all agree on what
+"close" means.
+
+## Usage
 
 ```bash
+# what could this source become?
+uv --project tools run python -m aesmovie.plan --source film.mkv
+
+# bake at the tier it picks
 uv --project tools run python -m aesmovie.bake \
     --source film.mkv --start 0 --duration 596 --quality auto \
     --build-dir build --preview build/preview.mp4
-```
 
-`--quality auto` calibrates, prints the same report, and bakes at the tier
-it selected. Pass a tier name to pin one. Individual flags such as
-`--chroma-weight` override the tier, and the tier overrides the defaults.
-
-A tile budget is enforced during the bake. A tier is chosen from a sample,
-and a sample cannot know that the third act is busier than the first, so a
-controller compares the recent rate of tile creation against the rate the
-remaining budget affords and tightens the redraw threshold while spending
-runs hot. Without it the dictionary runs out partway through and every
-remaining slot freezes, which ruins the end of a film rather than costing a
-little quality across all of it.
-
-## Building the cartridge
-
-```bash
+# build the cartridge
 bash toolchain/build-in-docker.sh
-```
 
-Runs [`build-in-docker.sh`](toolchain/build-in-docker.sh), which builds the
-68000 and Z80 sources with ngdevkit and emits a `.neo` for flash carts and
-emulators plus a MAME software-list archive. On non-Linux hosts it
-re-executes itself inside a container.
-
-## Verifying
-
-```bash
-bash tools/scripts/capture_rom.sh 900 build/check.png
+# check it against both emulators
+bash tools/scripts/capture_rom.sh 900 build/capture.png
 bash tools/scripts/verify_mame.sh
 ```
 
-[`capture_rom.sh`](tools/scripts/capture_rom.sh) drives the geolith core and
-grabs a frame. [`verify_mame.sh`](tools/scripts/verify_mame.sh) runs the same
-cartridge under MAME and compares the captured frame against the baker's own
-preview with [`verify_capture.py`](tools/scripts/verify_capture.py).
+`--quality` takes a tier name or `auto`. Individual flags such as
+`--chroma-weight` override the tier, and the tier overrides the defaults.
+`--target-fps` states a wanted frame rate instead of a hold, and the baker
+refuses a hold that would drop no source frame rather than silently doing
+nothing.
 
-Two emulators are used deliberately. geolith and MAME share no code, so
-agreement between them is good evidence about the board rather than about
-one author's reading of the documentation. Every hardware encoding this
-project depends on was read from their source rather than from prose.
+The build emits a `.neo` for flash carts and emulators plus a MAME
+software-list archive. On non-Linux hosts it re-executes itself in a
+container.
+
+## Verification
+
+Every hardware encoding this project depends on was read from emulator
+source rather than documentation, and the test suite carries independent
+transcriptions of geolith's tile reader and stream player used as oracles.
+geolith and MAME share no code, so agreement between them is evidence about
+the board rather than about one reading of the wiki.
+
+The strongest check reconstructs a frame from the cartridge's own bytes,
+replaying the command stream into a VRAM model and rendering from the packed
+character ROM, then compares that against what the emulator actually drew.
+
+On the ten minute cartridge:
+
+| Emulator | Result |
+|---|---|
+| geolith | Exact. 0.0000 error, pixel for pixel |
+| MAME | 1.0066 mean, 5 of 255 worst, plus column 0 |
+
+MAME returns column 0 black across all 224 rows, which geolith's overscan
+crop had been hiding. Excluding it, the residual is a smooth per-level
+difference, the signature of a different digital-to-analog model rather than
+a structural disagreement. Both are emulator-side.
+
+The full-length bake, for reference:
+
+| Quantity | Value |
+|---|---|
+| Frames | 35,274 |
+| Tiles used | 569,787 of a 1,048,576 budget |
+| Command stream | 3.0 MB across 3 of 8 banks |
+| Keyframes | 716 |
+| Mean slot updates per frame | 16.7 of 280 |
+| Cartridge | 139 MB |
+
+## What did not work
+
+Negative results, kept because they cost real time to find.
+
+**Frame blending.** The error metric ranked it the strongest lever
+available, cutting error from 23.33 to 9.11 at a fixed frame hold. On the
+cartridge it reads as a smear and was rejected on sight. The metric scores a
+blended frame as closer to the source sequence, because an average of the
+surrounding frames genuinely is closer by that measure than a stale frame
+is, while the eye reads the same average as an artifact. Removing it made
+the picture sharper *and* the movie slightly longer, since the blend was
+adding tiles.
+
+**Motion masking.** Raising the error budget where the picture moves is
+sound in a codec with residuals, and is roughly what Angel Studios did by
+degrading backgrounds in busy scenes. Across factors from 20 to 3000 the
+tile count here did not move by one entry while error rose fourfold. A
+deferred correction still has to point at a tile, so the tile is interned
+later regardless, just against a picture that has drifted further.
+
+**Flip deduplication.** 67 saved tiles out of 81,044. Exact 16x16 mirrors
+essentially do not occur in photographed or rendered material.
+
+**Compressing the command stream, and auto-animation.** Both save stream
+bytes. The stream used 3.0 MB of 8 MiB, so stream bytes are not scarce.
+
+**Palette-only fades.** Across a whole movie, 35.7% of frames change at all
+and only 4.6% of those are explained by a single global brightness scale.
+
+**Sprite-position motion compensation.** The grid tiles the raster, so
+moving a sprite shifts a whole 16 pixel column, and content almost never
+pans by exactly one tile.
+
+Two measurement traps also worth recording. Counting the *number* of slots
+that differ is useless as a scene-cut test on photographed material, where
+grain perturbs nearly every slot every frame: it fired on 22% of all frames,
+and each false cut rewrote all 280 slots. And a metric that averages the
+error of tiles the encoder *wrote* improves whenever the encoder skips more
+work, so it rewards doing less; the fidelity number here charges every slot
+of every frame against the true source frame instead.
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
 | [`src/`](src) | The 68000 player, the fix-layer menu, and the Z80 sound driver |
-| [`tools/aesmovie/`](tools/aesmovie) | The baker: decode, colour, palettes, tile dictionary, encoder, audio, ROM containers |
-| [`tools/tests/`](tools/tests) | Test suite, including independent transcriptions of geolith used as oracles |
+| [`tools/aesmovie/`](tools/aesmovie) | The baker: decode, colour, palettes, dictionary, encoder, quality ladder, audio, ROM containers |
+| [`tools/tests/`](tools/tests) | Test suite, including the emulator transcriptions used as oracles |
 | [`tools/scripts/`](tools/scripts) | Capture and verification helpers |
-| [`toolchain/`](toolchain) | The containerised build |
+| [`toolchain/`](toolchain) | The containerised ngdevkit build |
 
 ## Requirements
 
-ffmpeg and ffprobe on the path, `uv` for the Python side, Docker on
-non-Linux hosts for the build, and a Neo Geo BIOS for the emulators.
+ffmpeg and ffprobe on the path, [uv](https://docs.astral.sh/uv/) for the
+Python side, Docker on non-Linux hosts, and a Neo Geo BIOS for the
+emulators. Python 3.12 or newer.
 
 ## Credits
 
-Test footage is Big Buck Bunny and Tears of Steel, both by the Blender
-Foundation under CC BY.
+Built with [ngdevkit](https://github.com/dciabrin/ngdevkit). Verified
+against [geolith](https://github.com/libretro/geolith-libretro) and
+[MAME](https://github.com/mamedev/mame). Test footage is Big Buck Bunny and
+Tears of Steel, both by the Blender Foundation under CC BY.
