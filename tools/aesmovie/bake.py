@@ -527,6 +527,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--denoise", type=float, default=0.0)
     parser.add_argument("--frame-hold", type=int, default=1)
     parser.add_argument("--motion-blur", type=int, default=0)
+    parser.add_argument("--target-fps", type=float, default=None)
     parser.add_argument("--motion-masking", type=float, default=0.0)
     parser.add_argument("--chroma-weight", type=float, default=1.0)
     parser.add_argument("--scene-cut-floor", type=float, default=0.01)
@@ -544,8 +545,36 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _resolve_frame_hold(args: argparse.Namespace) -> int:
+    """Turn a wanted frame rate into a hold, and reject a hold that does nothing.
+
+    A hold counts display refreshes while the interesting quantity is
+    source frames, so the two only agree when the source runs at the
+    raster rate. Asking for 30 fps from a 24 fps source picks a hold of
+    2, which skips no source frame and buys no tiles while still
+    costing temporal accuracy. That is worth an error rather than a
+    silent no-op.
+    """
+    hold = int(args.frame_hold)
+    if args.target_fps is not None:
+        hold = frames.hold_for_target_fps(args.target_fps)
+    if hold <= 1:
+        return 1
+    source_fps = frames.probe(args.source).fps
+    if frames.source_frames_kept(hold, source_fps) >= 1.0:
+        effective = float(frames.VBLANK_FPS) / hold
+        msg = (
+            f"a hold of {hold} runs at {effective:.1f} fps, at or above the source's "
+            f"{float(source_fps):.1f} fps, so it drops no source frame and saves no tiles. "
+            f"Use a hold of {int(float(frames.VBLANK_FPS) // float(source_fps)) + 1} or more."
+        )
+        raise SystemExit(msg)
+    return hold
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    frame_hold = _resolve_frame_hold(args)
     outcome = run(
         BakeRequest(
             source=args.source,
@@ -554,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
             build_dir=args.build_dir,
             fit=args.fit,
             denoise=args.denoise,
-            frame_hold=args.frame_hold,
+            frame_hold=frame_hold,
             motion_blur=args.motion_blur,
             motion_masking=args.motion_masking,
             chroma_weight=args.chroma_weight,

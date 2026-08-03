@@ -36,6 +36,7 @@ class VideoInfo:
     width: int
     height: int
     duration: float
+    fps: Fraction
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +106,7 @@ def probe(path: Path) -> VideoInfo:
             "-select_streams",
             "v:0",
             "-show_entries",
-            "stream=width,height:format=duration",
+            "stream=width,height,r_frame_rate:format=duration",
             "-of",
             "json",
             str(path),
@@ -120,7 +121,29 @@ def probe(path: Path) -> VideoInfo:
         width=int(stream["width"]),
         height=int(stream["height"]),
         duration=float(payload["format"]["duration"]),
+        fps=Fraction(stream["r_frame_rate"]),
     )
+
+
+def hold_for_target_fps(target: float) -> int:
+    """Refreshes to hold each frame to land nearest a wanted rate."""
+    if target <= 0.0:
+        msg = f"target fps must be positive, got {target}"
+        raise ValueError(msg)
+    return max(1, round(float(VBLANK_FPS) / target))
+
+
+def source_frames_kept(hold: int, source_fps: Fraction) -> float:
+    """Fraction of the source's own frames a hold preserves.
+
+    A hold counts display refreshes, not source frames, and the two
+    differ: a 24 fps source reaching a 59.185 Hz raster already repeats
+    each frame about 2.47 times. Holding fewer refreshes than that skips
+    nothing and only shifts which refresh carries the update, so it
+    costs temporal accuracy and saves no tiles at all.
+    """
+    effective = float(VBLANK_FPS) / max(1, hold)
+    return min(1.0, effective / float(source_fps))
 
 
 def _even(value: int) -> int:

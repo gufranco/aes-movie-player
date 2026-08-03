@@ -353,3 +353,25 @@ class TestMotionBlur:
             return float(np.abs(np.diff(clip.astype(np.int16), axis=0)).mean())
 
         assert churn(blurred) < churn(plain)
+
+
+class TestFrameHoldPlanning:
+    def test_a_target_rate_maps_to_the_nearest_hold(self):
+        assert frames.hold_for_target_fps(59.2) == 1
+        assert frames.hold_for_target_fps(29.6) == 2
+        assert frames.hold_for_target_fps(15.0) == 4
+
+    def test_a_non_positive_target_is_rejected(self):
+        with pytest.raises(ValueError, match="positive"):
+            frames.hold_for_target_fps(0.0)
+
+    def test_a_hold_above_the_source_cadence_keeps_every_frame(self):
+        assert frames.source_frames_kept(2, Fraction(24)) == 1.0
+
+    def test_a_hold_below_the_source_cadence_drops_frames(self):
+        assert frames.source_frames_kept(4, Fraction(24)) < 1.0
+
+    def test_a_faster_source_makes_the_same_hold_drop_more(self):
+        assert frames.source_frames_kept(3, Fraction(30)) < frames.source_frames_kept(
+            3, Fraction(24)
+        )
