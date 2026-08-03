@@ -501,6 +501,21 @@ that has drifted further. The mechanism costs fidelity and buys nothing.
 It stays in the encoder at a default of zero, documented as measured
 rather than removed, so the next session does not re-derive it.
 
+## The M4 hardware wins are not worth taking, 2026-08-03
+
+Each was measured rather than argued about. None survives.
+
+| Idea | Measurement | Verdict |
+|---|---|---|
+| Compressed command stream | A ten minute movie used 3.0 MB of the 8 MiB available, across 3 of 8 banks | Nothing to win. The stream is not a constraint and the old note claiming it outgrows its window is wrong |
+| Auto-animation | Cycles a slot through 2, 4, or 8 sequential tiles without a stream write. Every tile still has to exist in character ROM | Saves stream bytes only, and stream bytes are not scarce. No effect on the binding resource |
+| Palette-only fades | Across the whole movie, 35.7% of frames change at all, and only 4.6% of those are explained by a single global brightness scale | An upper bound of about 5% of tile churn, for fade detection, a palette-ramp command, and player support. Not worth it |
+| Sprite-position motion compensation | The grid is a fixed 20 by 14 covering the raster, so moving a sprite shifts a whole 16 pixel column. Content almost never pans by exactly a tile | Cannot express the sub-tile shifts real motion needs |
+
+The character-ROM dictionary is the only resource that binds, and none of
+these reduce it. Effort belongs on the levers that do: closing the
+calibration gap, which currently costs a whole tier of quality on a feature.
+
 ## Milestones
 
 Spike first, then build outward. Each milestone is verifiable in geolith.
