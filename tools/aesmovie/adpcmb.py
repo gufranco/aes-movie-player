@@ -25,6 +25,7 @@ end address is ever overshot.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Final
@@ -82,6 +83,17 @@ def delta_n_for(rate_hz: float) -> int:
 def exact_rate(delta_n: int) -> Fraction:
     """Sample rate produced by a rate register value, without rounding."""
     return CHIP_RATE_HZ * delta_n / DELTA_N_UNITY
+
+
+def rate_below(rate_hz: float) -> float:
+    """The nearest playable rate at or under a wanted one.
+
+    `delta_n_for` rounds to the nearest step, which can land above the
+    caller's ceiling. Flooring onto the grid keeps a rate that has to
+    fit inside a budget from quietly exceeding it.
+    """
+    delta_n = max(1, math.floor(rate_hz * DELTA_N_UNITY / CHIP_RATE_HZ))
+    return rate_for(min(DELTA_N_MAX, delta_n))
 
 
 def rate_for(delta_n: int) -> float:

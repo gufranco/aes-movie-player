@@ -18,3 +18,5 @@ snap/
 diff/
 .DS_Store
 build-*.log
+specs/
+NEXT_SESSION.md

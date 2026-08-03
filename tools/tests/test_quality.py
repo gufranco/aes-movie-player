@@ -191,3 +191,32 @@ class TestShortfallMessage:
         trimmed = minutes - cheapest.trim_minutes
 
         assert quality.select(trimmed, 100_000.0) is not None
+
+
+class TestAudioFitsThePageCounter:
+    """ADPCM-B addresses in 256-byte pages through a 16-bit register.
+
+    Page 65,536 does not exist, so filling the voice ROM to exactly
+    16 MiB puts the last page one beyond what the player can name.
+    """
+
+    RUNTIMES = (1.0, 10.0, 25.0, 25.4, 26.0, 30.0, 40.0, 90.0)
+
+    @pytest.mark.parametrize("minutes", RUNTIMES)
+    def test_the_last_page_is_addressable(self, minutes):
+        rate = quality.audio_hz_for(minutes)
+
+        pages = minutes * quality.SECONDS_PER_MINUTE * rate * quality.ADPCM_B_BYTES_PER_SAMPLE / 256
+
+        assert pages <= quality.ADPCM_B_MAX_PAGES
+
+    @pytest.mark.parametrize("minutes", RUNTIMES)
+    def test_the_soundtrack_still_fits_the_voice_rom(self, minutes):
+        rate = quality.audio_hz_for(minutes)
+
+        needed = minutes * quality.SECONDS_PER_MINUTE * rate * quality.ADPCM_B_BYTES_PER_SAMPLE
+
+        assert needed <= quality.ADPCM_B_BYTES
+
+    def test_a_short_movie_is_unaffected(self):
+        assert quality.audio_hz_for(5.0) == quality.DEFAULT_AUDIO_HZ

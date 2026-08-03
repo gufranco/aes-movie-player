@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from aesmovie import crom, encode, palettes
+from aesmovie import crom, encode, palettes, stream
 from tests.geolith_model import GeolithTileReader, StreamPlayer
 
 HEIGHT = 224
@@ -543,3 +543,54 @@ class TestRateControl:
         result = encode.encode(clip, options(keyframe_interval=1, tile_budget=10))
 
         assert result.stats.budget_exceeded
+
+
+class TestSeekEquivalence:
+    """A keyframe must fully determine the screen.
+
+    The transport jumps to the nearest keyframe and plays on from there,
+    so if a keyframe record left any slot holding whatever the previous
+    scene put in it, every seek would land on a corrupted picture.
+    """
+
+    def clip(self, count: int) -> np.ndarray:
+        rng = np.random.default_rng(19)
+        return rng.integers(0, 256, size=(count, HEIGHT, WIDTH, 3), dtype=np.uint8)
+
+    def played_to(self, result, target: int) -> np.ndarray:
+        player = StreamPlayer()
+        blob = result.stream.blob()
+        offsets = result.stream.frame_offsets()
+        for frame in range(target + 1):
+            player.apply(blob, int(offsets[frame]))
+        return player.vram.copy()
+
+    def jumped_to(self, result, target: int) -> np.ndarray:
+        player = StreamPlayer()
+        player.apply(result.stream.blob(), int(result.stream.frame_offsets()[target]))
+        return player.vram.copy()
+
+    def test_every_keyframe_lands_where_sequential_play_would(self):
+        result = encode.encode(self.clip(12), options(keyframe_interval=4))
+
+        for keyframe in result.stream.keyframes():
+            assert np.array_equal(
+                self.played_to(result, int(keyframe)), self.jumped_to(result, int(keyframe))
+            )
+
+    def test_a_keyframe_rewrites_every_slot(self):
+        result = encode.encode(self.clip(12), options(keyframe_interval=4))
+
+        for keyframe in result.stream.keyframes():
+            assert result.updates_per_frame[int(keyframe)] == encode.SLOT_COUNT
+
+    def test_no_frame_record_straddles_a_bank_boundary(self):
+        result = encode.encode(self.clip(12), options(keyframe_interval=4))
+        blob = result.stream.blob()
+        offsets = result.stream.frame_offsets()
+
+        for frame, offset in enumerate(offsets):
+            end = StreamPlayer().apply(blob, int(offset))
+            assert int(offset) // stream.PROM_BANK_BYTES == (end - 1) // stream.PROM_BANK_BYTES, (
+                f"frame {frame} crosses a bank boundary"
+            )

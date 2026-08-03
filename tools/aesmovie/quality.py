@@ -25,12 +25,17 @@ import math
 from dataclasses import dataclass
 from typing import Final
 
+from aesmovie import adpcmb
+
 CROM_BYTES: Final = 128 << 20
 CROM_TILES: Final = 1 << 20
 TILE_BYTES: Final = 128
 STREAM_BYTES: Final = 8 << 20
 ADPCM_B_BYTES: Final = 16 << 20
 ADPCM_B_BYTES_PER_SAMPLE: Final = 0.5
+ADPCM_B_PAGE_BYTES: Final = 256
+ADPCM_B_MAX_PAGES: Final = ADPCM_B_BYTES // ADPCM_B_PAGE_BYTES
+
 DEFAULT_AUDIO_HZ: Final = 22050.0
 MIN_AUDIO_HZ: Final = 8000.0
 SECONDS_PER_MINUTE: Final = 60.0
@@ -92,12 +97,28 @@ def max_minutes(tier: Tier, reference_rate: float) -> float:
 
 
 def audio_hz_for(minutes: float) -> float:
-    """Highest sample rate whose soundtrack still fits the voice ROM."""
+    """Highest sample rate whose soundtrack the player can still address.
+
+    The limit is the page counter rather than the ROM. ADPCM-B addresses
+    in 256-byte pages through a 16-bit register, so the last page a
+    player can name is 65,535 and filling the voice ROM to exactly its
+    16 MiB puts the final page one beyond that. The counter wraps and
+    playback restarts from the beginning of the sample.
+
+    The rate is then floored onto the chip's own Delta-N grid, because
+    the encoder quantises to that grid afterwards and rounding to the
+    nearest step can come back a fraction above what was asked for. A
+    fixed safety margin cannot cover that, since the excess grows with
+    runtime; landing on the grid deliberately does.
+    """
     if minutes <= 0.0:
         return DEFAULT_AUDIO_HZ
     seconds = minutes * SECONDS_PER_MINUTE
-    affordable = ADPCM_B_BYTES / (seconds * ADPCM_B_BYTES_PER_SAMPLE)
-    return min(DEFAULT_AUDIO_HZ, affordable)
+    budget = (ADPCM_B_MAX_PAGES - 1) * ADPCM_B_PAGE_BYTES
+    affordable = budget / (seconds * ADPCM_B_BYTES_PER_SAMPLE)
+    if affordable >= DEFAULT_AUDIO_HZ:
+        return DEFAULT_AUDIO_HZ
+    return adpcmb.rate_below(affordable)
 
 
 @dataclass(frozen=True, slots=True)
