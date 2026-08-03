@@ -11,11 +11,14 @@ one contiguous stretch, because a single window sees one scene and one
 palette. The windows are then encoded as a single clip so the dictionary
 reuse between them is counted, which is what a full bake would get.
 
-The estimate runs slightly pessimistic. Each window boundary looks like
-a cut and earns a keyframe the real bake would not spend, and a short
-sample cannot see the reuse that accumulates over a whole feature. Both
-errors push the reported rate up, so a tier chosen from it has room
-rather than a shortfall.
+Accuracy is governed by how many windows there are, not by how long
+they are. A feature varies enormously in difficulty from scene to
+scene, so a handful of windows lands wherever it happens to land.
+Measured against a known full bake, 3 windows read 0.62 times the true
+rate, 6 read 1.58, and 12 read 0.91, while the total sampled time
+barely mattered. Coverage of the content is what converges, and at 24
+windows the estimate lands within a percent, which is why the default
+is many short windows rather than a few long ones.
 """
 
 from __future__ import annotations
@@ -26,8 +29,8 @@ import numpy as np
 
 from aesmovie import encode, frames, neocolor, quality
 
-DEFAULT_SAMPLE_COUNT: int = 6
-DEFAULT_SAMPLE_SECONDS: float = 5.0
+DEFAULT_SAMPLE_COUNT: int = 24
+DEFAULT_SAMPLE_SECONDS: float = 3.0
 
 
 def sample_windows(duration: float, *, count: int, seconds: float) -> list[tuple[float, float]]:

@@ -172,8 +172,8 @@ class _RateController:
 
     _SMOOTHING: Final = 0.05
     _RAMP_LIMIT: Final = 1.25
-    _DECAY: Final = 0.98
-    _SLACK: Final = 0.8
+    _DECAY: Final = 0.90
+    _SLACK: Final = 0.95
 
     def __init__(self, options: EncodeOptions) -> None:
         self._budget = options.tile_budget
