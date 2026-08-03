@@ -144,3 +144,30 @@ class TestValidation:
 
         with pytest.raises(ValueError, match="bank"):
             mamecart.write_cart(rom_dir=rom_dir, output=tmp_path / "x.zip")
+
+
+class TestRomOffsets:
+    def parse(self, path):
+        return ElementTree.parse(path).getroot()
+
+    def test_every_rom_declares_an_offset(self, rom_dir, tmp_path):
+        result = mamecart.write_cart(rom_dir=rom_dir, output=tmp_path / "cart.zip")
+
+        for rom in self.parse(result.software_list).iter("rom"):
+            assert rom.get("offset") is not None, rom.get("name")
+
+    def test_the_character_halves_land_on_alternating_bytes(self, rom_dir, tmp_path):
+        result = mamecart.write_cart(rom_dir=rom_dir, output=tmp_path / "cart.zip")
+
+        root = self.parse(result.software_list)
+        sprites = next(d for d in root.iter("dataarea") if d.get("name") == "sprites")
+        assert [r.get("offset") for r in sprites.findall("rom")] == ["0x000000", "0x000001"]
+
+    def test_single_rom_regions_start_at_zero(self, rom_dir, tmp_path):
+        result = mamecart.write_cart(rom_dir=rom_dir, output=tmp_path / "cart.zip")
+
+        root = self.parse(result.software_list)
+        for area in root.iter("dataarea"):
+            if area.get("name") == "sprites":
+                continue
+            assert area.find("rom").get("offset") == "0x000000"

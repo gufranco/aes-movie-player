@@ -48,9 +48,25 @@ def _digests(path: Path) -> tuple[str, str]:
     return hashlib.sha1(payload).hexdigest(), format(zlib.crc32(payload) & 0xFFFFFFFF, "08x")
 
 
-def _rom_element(parent: ElementTree.Element, path: Path, loadflag: str | None = None) -> None:
+def _rom_element(
+    parent: ElementTree.Element, path: Path, loadflag: str | None = None, offset: int = 0
+) -> None:
+    """Add one rom entry.
+
+    The offset is not optional. MAME's own software lists carry it on
+    every entry, and an interleaved pair needs 0 and 1 to land on
+    alternating bytes. Omitting it loads both halves at zero, so the
+    second silently overwrites the first and the sprite layer decodes
+    from wrong data.
+    """
     sha1, crc = _digests(path)
-    attrs = {"name": path.name, "size": str(path.stat().st_size), "crc": crc, "sha1": sha1}
+    attrs = {
+        "name": path.name,
+        "offset": f"0x{offset:06x}",
+        "size": str(path.stat().st_size),
+        "crc": crc,
+        "sha1": sha1,
+    }
     if loadflag:
         attrs["loadflag"] = loadflag
     ElementTree.SubElement(parent, "rom", attrs)
@@ -111,8 +127,8 @@ def build_software_list(
             "width": "32",
         },
     )
-    _rom_element(area, first, "load16_byte")
-    _rom_element(area, second, "load16_byte")
+    _rom_element(area, first, "load16_byte", offset=0)
+    _rom_element(area, second, "load16_byte", offset=1)
     return root
 
 

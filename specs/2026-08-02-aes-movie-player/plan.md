@@ -183,6 +183,7 @@ The baker lives under `tools/`, the cart under `src/`, and every generated artif
 | `toolchain/build-in-docker.sh` | ngdevkit build and .neo packaging |
 | `tools/scripts/capture_rom.sh` | headless geolith capture |
 | `tools/scripts/verify_capture.py` | matches a geolith capture against the baker's own render |
+| `tools/scripts/verify_mame.sh` | runs the cart in MAME and checks the frame it produces |
 | `NEXT_SESSION.md` | handoff, derived from this plan |
 
 ### Spike simplifications
@@ -255,6 +256,16 @@ The cart must run on a console, not only in an emulator. Everything encoded here
 | hflip bit 0, vflip bit 1, auto-animation bits 3 to 2 with 3 winning | matches | matches |
 | ADPCM-B voice region name | `.neo` V2 | `ymsnd:adpcmb` |
 | Watchdog period | resets when unkicked | documented at about 0.13 s |
+
+### Running it in MAME found a real packaging bug
+
+Reading MAME's source proved the encodings agree. Running the cart proved something source reading could not: the first MAME boot rendered a perfect transport overlay over a completely garbled picture. The fix layer, S-ROM, palette and player logic were all correct, and the sprite layer was decoding from wrong bytes.
+
+The cause was in the software list, not the cart. MAME's own lists carry an explicit `offset` on every rom entry, and an interleaved character pair needs `0x000000` and `0x000001` so the halves land on alternating bytes. Without them both halves load at zero and the second overwrites the first. With the offsets, MAME renders a frame matching the baker's own render to 1.62 of 255, against a median of 55 across non-matching frames. The residual is the two emulators modelling the palette DAC differently, not a content difference.
+
+This bug never affected the `.neo`, which interleaves the halves itself and was checked byte for byte against the tool it replaced. It would have broken every MAME run and any workflow built on that packaging.
+
+`tools/scripts/verify_mame.sh` makes the check repeatable.
 
 ### Where the emulators disagree, and hardware wins
 
