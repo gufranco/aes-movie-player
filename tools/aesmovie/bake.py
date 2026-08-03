@@ -163,6 +163,7 @@ class BakeRequest:
     sample_stride: int = 8
     seed: int = 0
     preview: Path | None = None
+    denoise: float = 0.0
     audio_rate_hz: float = 22050.0
     audio: bool = True
 
@@ -184,6 +185,7 @@ class BakeOutcome:
         return {
             "frames": stats.frames,
             "seconds": round(seconds, 3),
+            "denoise": self.request.denoise,
             "tile_count": stats.tile_count,
             "crom_payload_bytes": stats.crom_payload_bytes,
             "crom_rom_bytes": stats.crom_rom_bytes,
@@ -338,7 +340,11 @@ def _write_preview(path: Path, rendered: np.ndarray) -> None:
 def run(request: BakeRequest) -> BakeOutcome:
     """Decode, encode, and write every cart artifact."""
     clip = frames.decode(
-        request.source, start=request.start, duration=request.duration, fit=request.fit
+        request.source,
+        start=request.start,
+        duration=request.duration,
+        fit=request.fit,
+        denoise=request.denoise,
     )
     result = encode.encode(
         clip,
@@ -411,6 +417,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--duration", type=float, required=True)
     parser.add_argument("--build-dir", type=Path, default=Path("build"))
     parser.add_argument("--fit", choices=("fill", "letterbox"), default="fill")
+    parser.add_argument("--denoise", type=float, default=0.0)
     parser.add_argument("--palette-count", type=int, default=240)
     parser.add_argument("--base-bank", type=int, default=16)
     parser.add_argument("--keyframe-interval", type=int, default=45)
@@ -434,6 +441,7 @@ def main(argv: list[str] | None = None) -> int:
             duration=args.duration,
             build_dir=args.build_dir,
             fit=args.fit,
+            denoise=args.denoise,
             palette_count=args.palette_count,
             base_bank=args.base_bank,
             keyframe_interval=args.keyframe_interval,

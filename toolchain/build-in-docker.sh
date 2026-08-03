@@ -22,6 +22,19 @@ if [[ "$(uname)" != "Linux" ]]; then
     '
 fi
 
+retry_build() {
+    local attempt=0
+    until "$@"; do
+        attempt=$((attempt + 1))
+        if [ "$attempt" -ge 4 ]; then
+            echo "giving up after $attempt attempts: $*" >&2
+            return 1
+        fi
+        echo "retry $attempt/4 after a toolchain failure: $*" >&2
+        sleep 2
+    done
+}
+
 BUILD=build
 ROM="$BUILD/rom"
 BAKED="$BUILD/baked"
@@ -46,14 +59,14 @@ CFLAGS=(
 
 for unit in main menu; do
     echo "CC src/$unit.c"
-    m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "src/$unit.c" -o "$BUILD/$unit.o"
+    retry_build m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "src/$unit.c" -o "$BUILD/$unit.o"
 done
 
 echo "AS $GENERATED/movie_data.S"
-m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "$GENERATED/movie_data.S" -o "$BUILD/movie_data.o"
+retry_build m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "$GENERATED/movie_data.S" -o "$BUILD/movie_data.o"
 
 echo "LD $BUILD/rom.elf"
-m68k-neogeo-elf-gcc -o "$BUILD/rom.elf" "$BUILD/main.o" "$BUILD/menu.o" "$BUILD/movie_data.o" \
+retry_build m68k-neogeo-elf-gcc -o "$BUILD/rom.elf" "$BUILD/main.o" "$BUILD/menu.o" "$BUILD/movie_data.o" \
     -Wl,-Map="$BUILD/rom.map" $(pkg-config --libs ngdevkit)
 
 echo "[ram] section sizes:"
@@ -110,6 +123,7 @@ echo "[rom] sizes:"
 ls -la "$ROM"
 
 python3 tools/aesmovie/neofile.py --rom-dir "$ROM" --output "$BUILD/aesmovie.neo"
+python3 tools/aesmovie/mamecart.py --rom-dir "$ROM" --output "$BUILD/aesmovie.zip"
 
 ls -la "$BUILD/aesmovie.neo"
 echo "DONE"

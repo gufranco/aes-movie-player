@@ -278,3 +278,33 @@ class TestPayloadSize:
         movie.append([update(c, 0) for c in range(7)])
 
         assert movie.payload_size() == 64 + 2 + 7 * 8
+
+
+class TestHardwareBankLimit:
+    def test_the_limit_matches_the_three_bit_bank_register(self):
+        assert stream.PROM_BANK_LIMIT == 8
+
+    def test_a_stream_inside_the_limit_is_accepted(self):
+        movie = stream.MovieStream(bank_size=64)
+        for _ in range(8):
+            movie.append([update(0, 0), update(1, 0), update(2, 0)])
+
+        assert movie.bank_count() <= stream.PROM_BANK_LIMIT
+
+    def test_overrunning_the_bank_register_is_rejected(self):
+        movie = stream.MovieStream(bank_size=64)
+        for _ in range(120):
+            movie.append([update(c, 0) for c in range(6)])
+
+        with pytest.raises(ValueError, match="bank register"):
+            movie.bank_count()
+
+    def test_the_error_names_the_remedy(self):
+        movie = stream.MovieStream(bank_size=64)
+        for _ in range(120):
+            movie.append([update(c, 0) for c in range(6)])
+
+        try:
+            movie.bank_count()
+        except ValueError as error:
+            assert "compress" in str(error)

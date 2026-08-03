@@ -189,10 +189,13 @@ int main(void)
     uint8_t overlay_visible = 0;
 
     REG_LSPCMODE = LSPC_DISABLE_AUTOANIM;
+    watchdog_kick();
     select_cart_fix_rom();
     select_palette_bank_zero();
     clear_vram();
+    watchdog_kick();
     upload_palettes();
+    watchdog_kick();
     menu_init();
     setup_sprite_grid();
 

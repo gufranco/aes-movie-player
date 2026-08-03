@@ -53,16 +53,24 @@ static inline void vram_poke(uint16_t address, uint16_t value)
     REG_VRAMRW = value;
 }
 
+static inline void watchdog_kick(void) { REG_WATCHDOG = 0; }
+
+#define VRAM_FILL_WATCHDOG_INTERVAL 2048
+
 static inline void vram_fill(uint16_t address, uint16_t count, uint16_t value)
 {
+    uint16_t until_kick = VRAM_FILL_WATCHDOG_INTERVAL;
+
     REG_VRAMADDR = address;
     REG_VRAMMOD = 1;
     while (count--) {
         REG_VRAMRW = value;
+        if (--until_kick == 0) {
+            until_kick = VRAM_FILL_WATCHDOG_INTERVAL;
+            watchdog_kick();
+        }
     }
 }
-
-static inline void watchdog_kick(void) { REG_WATCHDOG = 0; }
 
 static inline void select_cart_fix_rom(void) { REG_CRTFIX = 0; }
 

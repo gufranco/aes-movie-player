@@ -38,6 +38,38 @@ class VideoInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class Denoise:
+    """hqdn3d strengths, spatial then temporal.
+
+    Denoising runs after the downscale rather than before it, because
+    what matters here is the temporal stability of the 320x224 tiles the
+    encoder deduplicates. Grain that survives into the scaled frame makes
+    every tile differ from its neighbour in time, which destroys the
+    delta path and inflates the dictionary. Cleaning the scaled image
+    targets exactly that.
+    """
+
+    luma_spatial: float = 4.0
+    chroma_spatial: float = 3.0
+    luma_temporal: float = 6.0
+    chroma_temporal: float = 4.5
+
+    def scaled(self, strength: float) -> Denoise:
+        return Denoise(
+            luma_spatial=self.luma_spatial * strength,
+            chroma_spatial=self.chroma_spatial * strength,
+            luma_temporal=self.luma_temporal * strength,
+            chroma_temporal=self.chroma_temporal * strength,
+        )
+
+    def to_filter(self) -> str:
+        return (
+            f"hqdn3d={self.luma_spatial:g}:{self.chroma_spatial:g}"
+            f":{self.luma_temporal:g}:{self.chroma_temporal:g}"
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Geometry:
     crop: tuple[int, int]
     image: tuple[int, int]
@@ -138,7 +170,7 @@ def plan_geometry(
     )
 
 
-def build_filter(geometry: Geometry, fps: Fraction = VBLANK_FPS) -> str:
+def build_filter(geometry: Geometry, fps: Fraction = VBLANK_FPS, denoise: float = 0.0) -> str:
     """Build the ffmpeg filter chain for a planned geometry.
 
     Scaling runs before the frame-rate resample so upsampling to the
@@ -152,6 +184,8 @@ def build_filter(geometry: Geometry, fps: Fraction = VBLANK_FPS) -> str:
         f"crop={crop_w}:{crop_h}",
         f"scale={image_w}:{image_h}:flags=lanczos",
     ]
+    if denoise > 0.0:
+        stages.append(Denoise().scaled(denoise).to_filter())
     if geometry.pad_top:
         stages.append(f"pad={target_w}:{target_h}:0:{geometry.pad_top}:black")
     stages.append(f"fps={fps.numerator}/{fps.denominator}")
@@ -167,6 +201,7 @@ def decode(
     fit: FitMode = "fill",
     target_width: int = TARGET_WIDTH,
     target_height: int = TARGET_HEIGHT,
+    denoise: float = 0.0,
 ) -> npt.NDArray[np.uint8]:
     """Decode a clip window into vblank-rate RGB frames."""
     info = probe(path)
@@ -184,7 +219,7 @@ def decode(
             "-t",
             f"{duration:.6f}",
             "-vf",
-            build_filter(geometry),
+            build_filter(geometry, denoise=denoise),
             "-an",
             "-sn",
             "-f",

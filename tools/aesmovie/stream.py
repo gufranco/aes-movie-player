@@ -35,6 +35,7 @@ FIRST_SPRITE: Final = 1
 MAX_TILE_NUMBER: Final = 1 << 20
 MAX_PALETTE: Final = 1 << 8
 PROM_BANK_BYTES: Final = 1 << 20
+PROM_BANK_LIMIT: Final = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,8 +141,23 @@ class MovieStream:
         return len(self._blob)
 
     def bank_count(self) -> int:
-        """Number of switchable banks the stream occupies, always at least one."""
-        return max(1, (len(self._blob) + self._bank_size - 1) // self._bank_size)
+        """Number of switchable banks the stream occupies, always at least one.
+
+        Real hardware latches only three bits of bank number, and MAME
+        masks the register with 0x07 to match. geolith allows far more,
+        so a cart that overruns eight banks runs correctly in one
+        emulator and silently reads the wrong bank on a console. The
+        limit is enforced at bake time rather than discovered on
+        hardware.
+        """
+        banks = max(1, (len(self._blob) + self._bank_size - 1) // self._bank_size)
+        if banks > PROM_BANK_LIMIT:
+            msg = (
+                f"stream needs {banks} banks but the hardware bank register holds only "
+                f"{PROM_BANK_LIMIT}; shorten the clip or compress the stream"
+            )
+            raise ValueError(msg)
+        return banks
 
     def blob(self) -> bytes:
         """The stream padded out to whole banks."""

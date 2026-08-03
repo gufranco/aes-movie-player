@@ -201,3 +201,77 @@ class TestDecodeLimits:
 
         with pytest.raises(RuntimeError, match="ffprobe"):
             frames._require_tool("ffprobe")
+
+
+class TestDenoise:
+    def test_the_chain_has_no_denoiser_by_default(self):
+        geometry = frames.plan_geometry(1280, 720, 320, 224, fit="fill")
+
+        assert "hqdn3d" not in frames.build_filter(geometry)
+
+    def test_a_positive_strength_inserts_the_denoiser(self):
+        geometry = frames.plan_geometry(1280, 720, 320, 224, fit="fill")
+
+        assert "hqdn3d" in frames.build_filter(geometry, denoise=1.0)
+
+    def test_the_denoiser_runs_after_the_downscale(self):
+        geometry = frames.plan_geometry(1280, 720, 320, 224, fit="fill")
+
+        chain = frames.build_filter(geometry, denoise=1.0)
+
+        assert chain.index("scale=") < chain.index("hqdn3d")
+
+    def test_the_denoiser_runs_before_the_frame_rate_resample(self):
+        geometry = frames.plan_geometry(1280, 720, 320, 224, fit="fill")
+
+        chain = frames.build_filter(geometry, denoise=1.0)
+
+        assert chain.index("hqdn3d") < chain.index("fps=")
+
+    def test_strength_scales_every_term(self):
+        weak = frames.Denoise().scaled(1.0).to_filter()
+        strong = frames.Denoise().scaled(2.0).to_filter()
+
+        assert weak != strong
+        assert strong == "hqdn3d=8:6:12:9"
+
+    def test_the_denoiser_runs_before_letterbox_padding(self):
+        geometry = frames.plan_geometry(1280, 720, 320, 224, fit="letterbox")
+
+        chain = frames.build_filter(geometry, denoise=1.0)
+
+        assert chain.index("hqdn3d") < chain.index("pad=")
+
+    def test_denoising_a_clip_still_returns_the_expected_frames(self, synthetic_clip):
+        clip = frames.decode(synthetic_clip, start=0.0, duration=0.3, denoise=1.0)
+
+        assert clip.shape == (frames.frame_count(seconds=0.3), 224, 320, 3)
+
+    def test_denoising_reduces_frame_to_frame_change(self, tmp_path):
+        noisy = tmp_path / "noise.mp4"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=640x360:rate=24:duration=1",
+                "-vf",
+                "noise=alls=40:allf=t+u",
+                "-pix_fmt",
+                "yuv420p",
+                str(noisy),
+            ],
+            check=True,
+        )
+
+        plain = frames.decode(noisy, start=0.0, duration=0.4)
+        cleaned = frames.decode(noisy, start=0.0, duration=0.4, denoise=2.0)
+
+        def churn(clip):
+            return float(np.abs(np.diff(clip.astype(np.int16), axis=0)).mean())
+
+        assert churn(cleaned) < churn(plain)

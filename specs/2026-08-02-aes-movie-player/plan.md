@@ -21,15 +21,17 @@ These come from the research pass and bound the design. See `references.md` for 
 
 | Resource | Ceiling | Consequence |
 |----------|---------|-------------|
-| C-ROM tile number | 20 bits, 1,048,576 tiles, 128 MiB per bank window | The video tile dictionary caps at 128 MiB unless C-ROM is bankswitched |
-| C-ROM banks | 8 banks supported, used by Giga Power carts | Bankswitching at segment boundaries extends total video beyond 128 MiB |
+| C-ROM tile number | 20 bits, 1,048,576 tiles, 128 MiB, and there is no bank register | Absolute ceiling on the tile dictionary, about 4.4 minutes of video |
+| P-ROM banks | 3-bit register, 8 banks of 1 MiB at `0x200000`, plus the fixed first MiB | The command stream fits about 6.5 minutes, so C-ROM binds first |
 | Sprite tile | 16x16, 4bpp, 128 bytes, 15 colors plus transparent index 0 | The dictionary unit is a 16x16 tile at 128 bytes |
 | ADPCM-B ROM | 16 MiB, one continuous loopable sample | About 25 minutes of audio at 22 kHz, never the limiting factor |
 | ADPCM-B rate | 1.85 to 55.5 kHz via Delta-N | Pick around 22 to 32 kHz mono for a good soundtrack |
 | Per-scanline sprites | 96 | A 20-column full-screen grid uses 20, far under the limit |
 | Total sprites | 381 | 20 for the video grid leaves room for foreground layers |
 
-The single dominant constraint on video is the 128 MiB C-ROM window. Worst case, every one of the 280 on-screen tiles is unique every frame, so a frame costs 280 x 128 = 35,840 bytes and 128 MiB holds about 3,745 frames, roughly 63 seconds at full framerate. Every technique below exists to beat that worst case by a large multiple, and C-ROM bankswitching lifts the ceiling for longer runtimes.
+The single dominant constraint on video is the 128 MiB C-ROM window. Worst case, every one of the 280 on-screen tiles is unique every frame, so a frame costs 280 x 128 = 35,840 bytes and 128 MiB holds about 3,745 frames, roughly 63 seconds at full framerate. The encoder passes below beat that worst case by about 4.3x, reaching roughly 4.4 minutes.
+
+**There is no way past 128 MiB.** The design assumed C-ROM bankswitching across 8 banks would extend total video, on the strength of a low-confidence claim about Giga Power carts. Neither geolith nor MAME implements a C-ROM bank register on any board, including every bootleg mapper MAME emulates, and none could: the tile number is 20 bits in the SCB1 attribute word and 2^20 tiles at 128 bytes is exactly 128 MiB, so the address space is full. Runtime past 4.4 minutes has to come from spending fewer bytes per minute, not from more address space.
 
 ## Architecture
 
@@ -174,6 +176,7 @@ The baker lives under `tools/`, the cart under `src/`, and every generated artif
 | `src/menu.c` | fix-layer transport overlay, auto-hiding |
 | `tools/aesmovie/fixtiles.py` | generates the S-ROM glyphs the overlay draws with |
 | `tools/aesmovie/neofile.py` | streams the .neo cart container, replacing neosdconv |
+| `tools/aesmovie/mamecart.py` | MAME software-list cart, for cross-checking against a second implementation |
 | `tools/aesmovie/adpcmb.py` | mono ADPCM-B encoder for the YM2610 voice ROM |
 | `src/sound.s` | Z80 driver that starts and loops the ADPCM-B soundtrack |
 | `src/movie_data.S` | links the baked blobs into the ROM |
@@ -235,7 +238,37 @@ Measured on the same 20 seconds, one lever at a time against `scene-cut 0.90`.
 - **The scene-cut threshold was badly wrong at 0.55.** On busy motion more than half the slots change on most frames, so 351 of 1183 frames became keyframes and the delta path was barely exercised. At 0.90 that falls to 206. Keyframe count does not change the dictionary at all, since a keyframe re-emits slots whose tiles are already interned, but it dominates the stream.
 - **240 palettes cost nothing over 64 and quantize 22 percent better.** Keep the full bank allocation.
 - **Quality beats the design-time prediction.** The plan expected Sega CD and 3DO grade output, visibly tiled on busy motion. At 15 colors per 16x16 tile drawn from 240 banks, the mean error is about 0.025 Oklab, near the just-noticeable threshold, and tiling is not obvious in stills. The user judges the motion.
+- **Sprite-position motion compensation is not worth building for this content.** The design called it the biggest hardware win. Measured by phase correlation across the clip, only 12 percent of frames have any nonzero global shift, and on the 10 percent that are both confidently matched and moving, 222 of 280 tiles still change, so the motion is not a clean translation the position registers could absorb. It would still pay on genuinely panning footage, which this is not.
+- **Denoise buys 1.1 percent on clean animation.** Strength 2.0 takes the dictionary from 77,743 tiles to 76,894 while slightly improving mean error, since removing grain also removes something the quantizer was spending colors on. The pass is worth keeping for live action, where grain makes every tile differ in time, but it is not a lever on rendered material.
 - **The encoder implements only techniques 1, 2, 5, and the keyframe cadence.** Sprite-position motion compensation, palette-only effects, layering, auto-animation, stream compression, denoise preprocessing, and motion-adaptive keyframes are all still unbuilt, so 30 MB per minute is a floor-of-effort figure rather than the best this design can do.
+
+## Real hardware
+
+The cart must run on a console, not only in an emulator. Everything encoded here was first confirmed against geolith, which models the board rather than being it, so each encoding is now cross-checked against MAME as an independent implementation. The build emits both a `.neo` for a flash cart and a MAME zip with a software list, so any change can be run in two emulators that share no code.
+
+### Confirmed by two independent implementations
+
+| Encoding | geolith | MAME |
+|----------|---------|------|
+| SCB1 tile number bits 19 to 16 in attribute bits 7 to 4 | `(attr & 0x00f0) << 12` | `(attr << 12) & 0xf0000` |
+| Palette in attribute bits 15 to 8 | `(attr >> 4) & 0x0ff0` | `attr >> 8` |
+| hflip bit 0, vflip bit 1, auto-animation bits 3 to 2 with 3 winning | matches | matches |
+| ADPCM-B voice region name | `.neo` V2 | `ymsnd:adpcmb` |
+| Watchdog period | resets when unkicked | documented at about 0.13 s |
+
+### Where the emulators disagree, and hardware wins
+
+geolith masks the program-ROM bank register with a mask derived from the ROM size, up to 8 bits. MAME masks it with `0x07`, matching the three-bit latch on the board. A cart whose stream needs more than 8 banks therefore runs correctly in geolith and reads the wrong bank on a console. The baker now refuses to produce one, naming the remedy in the error.
+
+### Hardware-safety measures in the player
+
+- The watchdog is kicked through the long initialization loops, not only once per frame. Clearing VRAM alone is about 2.5 frames of writes against a 7.7 frame budget, which was within tolerance but had no margin.
+- The Z80 enables its own NMI by writing port `0x08`. Without it the sound processor never receives a command, which is invisible while the driver also self-starts.
+- The build retries a failed compile. The cross toolchain segfaults intermittently under emulation, and a spurious failure is not a code defect.
+
+### Still unverified
+
+Nothing has run on a console. The colour model follows the board's resistor ladder rather than a linear scale, so output should be close, but the exact analog result is unverified. Timing is modelled, not measured: the player fits its writes in vblank in both emulators, and the same code takes the same cycles on a 12 MHz 68000, but that is inference.
 
 ## Milestones
 

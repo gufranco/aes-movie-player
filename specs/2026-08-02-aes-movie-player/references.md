@@ -43,6 +43,16 @@ The design-time caveats about SCB bit positions and the color word are closed by
 - The `.neo` container carries separate V1 and V2 regions, parsed at `geo_neo.c`. V1 is ADPCM-A and V2 is ADPCM-B, which answers the region-naming question for geolith. The MAME dataarea naming still needs its own check before the audio bake.
 - The libretro front end crops by the `geolith_overscan_*` options, defaulting to 8 pixels per side, so a capture shows 304 of the 320 active columns unless the options are zeroed.
 
+## Cross-check against MAME, 2026-08-03
+
+geolith models the board; MAME is a second implementation sharing no code with it. Sparse checkout of [mamedev/mame](https://github.com/mamedev/mame), `src/mame/snk` and `src/devices/bus/neogeo`. Confidence 9 for real hardware where both agree.
+
+- Sprite attribute decode at `neogeo_spr.cpp`, `draw_sprites`: `code = ((attr << 12) & 0xf0000) | videoram[offs]`, palette `attr >> 8`, `BIT(attr, 0)` horizontal flip, `BIT(attr, 1)` vertical flip, `BIT(attr, 3)` then `BIT(attr, 2)` for auto-animation. Every field matches geolith exactly, which settles the SCB1 layout the design flagged as uncertain.
+- The MAME software-list dataarea for the ADPCM-B voice ROM is `ymsnd:adpcmb`, from `src/devices/bus/neogeo/slot.cpp`. This closes the region-naming question the audio bake was blocked on.
+- The watchdog resets the system after about 0.13 seconds, documented in `neogeo.cpp`. That is roughly 7.7 frames, which bounds how long an initialization loop may run without a kick.
+- **The two emulators disagree on the program-ROM bank register.** MAME's `write_banksel` masks the value with `0x07`, giving 8 banks of 1 MiB mapped from offset 1 MiB, matching the three-bit latch on the board. geolith derives its mask from the ROM size and permits up to 8 bits. A stream needing more than 8 banks therefore works in geolith and reads the wrong bank on hardware, so the baker enforces the MAME and hardware limit.
+- **Neither emulator implements C-ROM bankswitching**, on any board type, including every bootleg mapper MAME carries. The sprite tile number is 20 bits and MAME masks the resulting address with `m_sprite_gfx_address_mask` derived from the region size. The design's claim that 8 C-ROM banks extend video beyond 128 MiB is not supported, and cannot be: 2^20 tiles at 128 bytes is exactly the 128 MiB the 20-bit number addresses.
+
 ## Caveats
 
 - The exact split of the 20-bit tile number across the odd attribute word, and the exact palette-field width, were reported inconsistently by one fetched summary. Closed on 2026-08-02 by reading geolith, see the section above. Worth a second confirmation against furrtek's programming manual before the design depends on real-hardware behavior that an emulator could have wrong.
