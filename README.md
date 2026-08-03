@@ -155,12 +155,13 @@ equivalent lever is the distance metric every stage already shares. Weighting
 it once moves palette fitting, tile assignment, and redraw decisions onto a
 luma-first metric together.
 
-**Calibration is deliberately pessimistic.** Each sample window boundary
-looks like a cut and earns a keyframe a real bake never spends, and a short
-sample cannot see the dictionary reuse that accumulates across a whole
-feature. On a ten minute source the estimate came in about 1.6 times the
-tiles the full bake actually used. The direction is safe; the magnitude
-currently costs roughly a tier of quality on a feature.
+**Calibration accuracy comes from window count, not sample length.** A
+feature varies enormously in difficulty from scene to scene, so a handful of
+windows lands wherever it happens to land. Measured against a known full
+bake, 3 windows read 0.62 times the true rate, 6 read 1.58, and 12 read
+0.91, while total sampled time barely mattered. Coverage of the content is
+what converges. The default of 24 short windows lands within a percent, for
+72 seconds of sampling.
 
 ## Rate control
 
@@ -308,6 +309,16 @@ and only 4.6% of those are explained by a single global brightness scale.
 **Sprite-position motion compensation.** The grid tiles the raster, so
 moving a sprite shifts a whole 16 pixel column, and content almost never
 pans by exactly one tile.
+
+**Near-duplicate merging in the dictionary.** The obvious attack on the
+binding constraint, and it does not pay. At thresholds fine enough to be
+imperceptible it collapses 1 to 3% of the dictionary; only signatures coarse
+enough to visibly destroy detail reach 48%. Tiles genuinely differ.
+
+**Dithering the source before quantisation.** No measurable effect, because
+the banding comes from the 15 colours a tile may use rather than from the
+15-bit colour word. Dithering inside palette assignment would be the real
+lever and has not been built.
 
 Two measurement traps also worth recording. Counting the *number* of slots
 that differ is useless as a scene-cut test on photographed material, where
