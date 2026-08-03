@@ -16,6 +16,7 @@ import json
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Final
 
@@ -124,6 +125,8 @@ _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 #define MOVIE_STREAM_BYTES {stream_bytes}u
 #define MOVIE_FPS_NUM {fps_num}u
 #define MOVIE_FPS_DEN {fps_den}u
+#define MOVIE_AUDIO_PAGE_NUM {audio_page_num}u
+#define MOVIE_AUDIO_PAGE_DEN {audio_page_den}u
 
 #define FIX_PALETTE {fix_palette}
 {fix_defines}
@@ -200,8 +203,30 @@ class BakeOutcome:
         }
 
 
+def audio_pages_per_frame(delta_n: int) -> Fraction:
+    """Voice-ROM pages advanced per video frame, as an exact fraction.
+
+    The player multiplies a frame number by this to find where in the
+    soundtrack that frame sits, which is what lets a seek re-point audio
+    and video together. Two samples share a byte and a page is 256
+    bytes, hence the 512.
+
+    This is deliberately a ratio rather than fixed point. A rounded
+    fixed-point step accumulates: at 4096ths of a page the error reaches
+    a quarter of a second by the half-hour mark, which is a visible lip
+    sync failure. An exact ratio keeps the error at the page
+    quantization alone, about 23 ms, no matter how long the movie runs.
+    """
+    if delta_n <= 0:
+        return Fraction(0)
+    return adpcmb.exact_rate(delta_n) / (512 * frames.VBLANK_FPS)
+
+
 def _write_sources(
-    build_dir: Path, outcome_paths: dict[str, Path], result: encode.EncodeResult
+    build_dir: Path,
+    outcome_paths: dict[str, Path],
+    result: encode.EncodeResult,
+    audio_pages: Fraction = Fraction(0),
 ) -> tuple[Path, Path]:
     generated = build_dir / "generated"
     generated.mkdir(parents=True, exist_ok=True)
@@ -234,6 +259,8 @@ def _write_sources(
             fps_den=frames.VBLANK_FPS.denominator,
             fix_palette=FIX_PALETTE_BANK,
             fix_defines=_fix_defines(),
+            audio_page_num=audio_pages.numerator,
+            audio_page_den=audio_pages.denominator or 1,
         )
     )
     return asm, header
@@ -351,6 +378,7 @@ def run(request: BakeRequest) -> BakeOutcome:
         path.write_bytes(data)
         artifacts[key] = path
 
+    audio_pages = Fraction(0)
     if request.audio:
         samples = _decode_audio(
             request.source, request.start, request.duration, request.audio_rate_hz
@@ -361,8 +389,9 @@ def run(request: BakeRequest) -> BakeOutcome:
             (baked / "v2.bin").write_bytes(voice)
             artifacts["voice"] = baked / "v2.bin"
             _write_audio_params(request.build_dir, encoded)
+            audio_pages = audio_pages_per_frame(encoded.delta_n)
 
-    asm, header = _write_sources(request.build_dir, artifacts, result)
+    asm, header = _write_sources(request.build_dir, artifacts, result, audio_pages)
     artifacts["asm"] = asm
     artifacts["header"] = header
 

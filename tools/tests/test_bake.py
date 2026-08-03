@@ -7,7 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from aesmovie import bake, neocolor, stream
+from aesmovie import adpcmb, bake, neocolor, stream
+from aesmovie import frames as frames_mod
 
 
 @pytest.fixture(scope="module")
@@ -449,3 +450,65 @@ class TestAudio:
         )
 
         assert not (outcome.build_dir / "baked" / "v2.bin").exists()
+
+
+class TestAudioVideoAlignment:
+    def rate_and_pages(self):
+
+        delta_n = adpcmb.delta_n_for(22050)
+        return adpcmb.rate_for(delta_n), bake.audio_pages_per_frame(delta_n)
+
+    def test_a_silent_bake_reports_no_audio_advance(self):
+        assert bake.audio_pages_per_frame(0) == 0
+
+    def test_the_ratio_matches_the_sample_rate(self):
+
+        rate, pages = self.rate_and_pages()
+
+        assert float(pages) == pytest.approx(rate / 512 / float(frames_mod.VBLANK_FPS), rel=1e-6)
+
+    def test_audio_never_drifts_more_than_half_a_page_from_the_video(self):
+
+        rate, pages = self.rate_and_pages()
+        num, den = pages.numerator, pages.denominator
+        half_page = 512 / rate / 2
+
+        for frame in (0, 59, 1183, 3551, 60000, 106_000, 500_000):
+            page = (frame * num + den // 2) // den
+            audio_seconds = page * 512 / rate
+            video_seconds = frame / float(frames_mod.VBLANK_FPS)
+
+            assert abs(audio_seconds - video_seconds) <= half_page + 1e-9, frame
+
+    def test_the_drift_does_not_grow_with_runtime(self):
+
+        rate, pages = self.rate_and_pages()
+        num, den = pages.numerator, pages.denominator
+
+        def drift(frame):
+            page = (frame * num + den // 2) // den
+            return abs(page * 512 / rate - frame / float(frames_mod.VBLANK_FPS))
+
+        assert drift(500_000) <= drift(1183) + 512 / rate
+
+    def test_the_seek_granularity_is_one_page(self):
+        rate, _ = self.rate_and_pages()
+
+        assert 512 / rate == pytest.approx(0.0232, abs=0.001)
+
+    def test_the_header_carries_the_alignment_ratio(self, synthetic_clip, tmp_path):
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=synthetic_clip,
+                start=0.0,
+                duration=0.2,
+                build_dir=tmp_path / "b",
+                palette_count=4,
+                candidates=0,
+                sample_stride=1,
+            )
+        )
+
+        text = (outcome.build_dir / "generated" / "movie_data.h").read_text()
+        assert "MOVIE_AUDIO_PAGE_NUM" in text
+        assert "MOVIE_AUDIO_PAGE_DEN" in text

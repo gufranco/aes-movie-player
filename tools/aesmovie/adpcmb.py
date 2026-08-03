@@ -26,6 +26,7 @@ end address is ever overshot.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Final
 
 import numpy as np
@@ -37,8 +38,12 @@ STEP_MAX: Final = 24576
 SAMPLE_MIN: Final = -32768
 SAMPLE_MAX: Final = 32767
 
-BASE_RATE_HZ: Final = 55555
+CHIP_CLOCK_HZ: Final = 8_000_000
+CHIP_DIVIDER: Final = 144
+CHIP_RATE_HZ: Final = Fraction(CHIP_CLOCK_HZ, CHIP_DIVIDER)
+DELTA_N_UNITY: Final = 0x10000
 DELTA_N_MAX: Final = 0xFFFF
+BASE_RATE_HZ: Final = float(CHIP_RATE_HZ)
 PAGE_BYTES: Final = 256
 SILENT_BYTE: Final = 0x08
 ADPCM_B_MAX_BYTES: Final = 16 << 20
@@ -62,16 +67,26 @@ class EncodedAudio:
 
 
 def delta_n_for(rate_hz: float) -> int:
-    """Rate register for a target sample rate."""
+    """Rate register for a target sample rate.
+
+    ymfm advances a 16-bit accumulator by this value each chip sample
+    and consumes a nibble when it passes 0x10000, so the divisor is
+    65536 rather than the 65535 the hardware notes quote.
+    """
     if not 0 < rate_hz <= BASE_RATE_HZ:
         msg = f"rate {rate_hz} must be above 0 and at most {BASE_RATE_HZ} Hz"
         raise ValueError(msg)
-    return min(DELTA_N_MAX, round(rate_hz * DELTA_N_MAX / BASE_RATE_HZ))
+    return min(DELTA_N_MAX, round(rate_hz * DELTA_N_UNITY / CHIP_RATE_HZ))
+
+
+def exact_rate(delta_n: int) -> Fraction:
+    """Sample rate produced by a rate register value, without rounding."""
+    return CHIP_RATE_HZ * delta_n / DELTA_N_UNITY
 
 
 def rate_for(delta_n: int) -> float:
     """Sample rate produced by a rate register value."""
-    return BASE_RATE_HZ * delta_n / DELTA_N_MAX
+    return float(exact_rate(delta_n))
 
 
 def encode(samples: npt.NDArray[np.integer], *, rate_hz: float = 22050.0) -> EncodedAudio:

@@ -9,6 +9,8 @@ encoder's own model.
 
 from __future__ import annotations
 
+from fractions import Fraction
+
 import numpy as np
 import pytest
 
@@ -46,8 +48,17 @@ def sine(count: int, cycles: float, amplitude: int = 20000) -> np.ndarray:
 
 
 class TestDeltaN:
-    def test_the_rate_register_follows_the_documented_formula(self):
-        assert adpcmb.delta_n_for(55555) == 65535
+    def test_the_rate_register_follows_the_chip_accumulator(self):
+        assert adpcmb.delta_n_for(adpcmb.BASE_RATE_HZ) == 65535
+
+    def test_the_unity_step_is_the_accumulator_wrap(self):
+        assert adpcmb.DELTA_N_UNITY == 0x10000
+
+    def test_the_chip_rate_is_the_clock_over_the_divider(self):
+        assert float(adpcmb.CHIP_RATE_HZ) == pytest.approx(55555.5556, abs=0.001)
+
+    def test_the_exact_rate_is_a_ratio(self):
+        assert isinstance(adpcmb.exact_rate(26011), Fraction)
 
     def test_a_common_rate_lands_close_to_the_request(self):
         delta_n = adpcmb.delta_n_for(22050)

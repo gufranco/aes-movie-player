@@ -31,7 +31,50 @@
 static const uint16_t speed_ladder[] = {2, 5, 10};
 #define SPEED_STEPS ((uint16_t)(sizeof(speed_ladder) / sizeof(speed_ladder[0])))
 
+#define SOUND_CMD_SHIFT_PAGE 0x10
+#define SOUND_CMD_PLAY        0x50
+#define SOUND_CMD_STOP        0x60
+#define SOUND_ACK_TIMEOUT     0x4000
+
 static uint16_t stream_bank = 0xFFFF;
+static uint8_t audio_running = 0;
+
+static void sound_send(uint8_t code)
+{
+    uint8_t before = REG_SOUND;
+    uint16_t guard = SOUND_ACK_TIMEOUT;
+
+    REG_SOUND = code;
+    while (REG_SOUND == before && guard--) {
+    }
+}
+
+static uint16_t audio_page_for(uint32_t frame)
+{
+    uint64_t scaled = (uint64_t)frame * MOVIE_AUDIO_PAGE_NUM + (MOVIE_AUDIO_PAGE_DEN / 2u);
+
+    return (uint16_t)(scaled / MOVIE_AUDIO_PAGE_DEN);
+}
+
+static void audio_seek(uint32_t frame)
+{
+    uint16_t page = audio_page_for(frame);
+
+    sound_send((uint8_t)(SOUND_CMD_SHIFT_PAGE | ((page >> 12) & 0x0F)));
+    sound_send((uint8_t)(SOUND_CMD_SHIFT_PAGE | ((page >> 8) & 0x0F)));
+    sound_send((uint8_t)(SOUND_CMD_SHIFT_PAGE | ((page >> 4) & 0x0F)));
+    sound_send((uint8_t)(SOUND_CMD_SHIFT_PAGE | (page & 0x0F)));
+    sound_send(SOUND_CMD_PLAY);
+    audio_running = 1;
+}
+
+static void audio_halt(void)
+{
+    if (audio_running) {
+        sound_send(SOUND_CMD_STOP);
+        audio_running = 0;
+    }
+}
 
 static void clear_vram(void)
 {
@@ -153,6 +196,12 @@ int main(void)
     menu_init();
     setup_sprite_grid();
 
+    wait_vblank();
+    watchdog_kick();
+    apply_frame(0);
+    frame = 1;
+    audio_seek(0);
+
     for (;;) {
         uint8_t pad = (uint8_t)~REG_P1CNT;
         uint8_t start = (uint8_t)(~REG_STATUS_B & STATUS_START);
@@ -170,10 +219,16 @@ int main(void)
         if ((pressed & PAD_A) || start_pressed) {
             state = (state == TRANSPORT_PAUSE) ? TRANSPORT_PLAY : TRANSPORT_PAUSE;
             speed = 1;
+            if (state == TRANSPORT_PAUSE) {
+                audio_halt();
+            } else {
+                audio_seek(frame);
+            }
         }
         if (pressed & PAD_B) {
             state = TRANSPORT_PLAY;
             speed = 1;
+            audio_seek(frame);
         }
         if (pressed & PAD_RIGHT) {
             if (state != TRANSPORT_FORWARD) {
@@ -183,11 +238,13 @@ int main(void)
             }
             state = TRANSPORT_FORWARD;
             speed = speed_ladder[speed_index];
+            audio_halt();
         }
         if (pressed & PAD_LEFT) {
             state = TRANSPORT_REWIND;
             speed = 1;
             rewind_countdown = REWIND_FRAMES_PER_STEP;
+            audio_halt();
         }
         if (pressed & PAD_C) {
             uint32_t back = seconds_to_frames(SEEK_SECONDS);
@@ -195,11 +252,13 @@ int main(void)
             frame = seek_to((frame > back) ? frame - back : 0);
             state = TRANSPORT_PLAY;
             speed = 1;
+            audio_seek(frame);
         }
         if (pressed & PAD_D) {
             frame = seek_to(frame + seconds_to_frames(SEEK_SECONDS));
             state = TRANSPORT_PLAY;
             speed = 1;
+            audio_seek(frame);
         }
 
         wait_vblank();
@@ -213,6 +272,7 @@ int main(void)
                 rewind_countdown = REWIND_FRAMES_PER_STEP;
                 if (frame == 0) {
                     state = TRANSPORT_PLAY;
+                    audio_seek(frame);
                 } else {
                     frame = keyframe_at_or_before(frame - 1);
                     apply_frame(frame);
@@ -227,6 +287,9 @@ int main(void)
                 apply_frame(frame);
                 if (++frame >= MOVIE_FRAME_COUNT) {
                     frame = 0;
+                    if (state == TRANSPORT_PLAY) {
+                        audio_seek(0);
+                    }
                     break;
                 }
             }

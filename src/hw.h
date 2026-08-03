@@ -8,6 +8,8 @@
 #define REG_VRAMMOD  (*(volatile uint16_t *)0x3C0004)
 #define REG_LSPCMODE (*(volatile uint16_t *)0x3C0006)
 
+#define REG_SOUND    (*(volatile uint8_t *)0x320000)
+
 #define REG_P1CNT    (*(volatile uint8_t *)0x300000)
 #define REG_WATCHDOG (*(volatile uint8_t *)0x300001)
 #define REG_STATUS_B (*(volatile uint8_t *)0x380000)
