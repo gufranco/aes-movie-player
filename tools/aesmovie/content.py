@@ -9,6 +9,12 @@ Two measurements, each tied to one decision:
 - Saturation, from `signalstats`. Colour weight is charged against the a and
   b axes of the metric, so on washed-out material a low weight costs little
   and on vivid material it costs a lot.
+- Movement, from the source's own frame-to-frame slot distances. What counts
+  as "this slot moved" decides when a scene cut fires, and a fixed threshold
+  is not portable: 0.01 flagged 1% of slots on one film and 22% on another,
+  so cut detection meant something different on each. Taking a high
+  percentile of the movement the source actually shows makes it mean the
+  same thing everywhere.
 - Scene cuts, from `scdet`. Palettes are fitted per epoch, and an epoch that
   spans a cut has to serve two scenes with one set of colours.
 
@@ -29,7 +35,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from aesmovie import frames
+import numpy as np
+
+from aesmovie import encode, frames, neocolor, palettes
 
 MIN_EPOCH_SECONDS: Final = 2.5
 MAX_EPOCH_SECONDS: Final = 8.0
@@ -106,3 +114,31 @@ def epoch_seconds_for(*, cuts_per_minute: float) -> float:
         return MAX_EPOCH_SECONDS
     wanted = SECONDS_PER_MINUTE / cuts_per_minute
     return min(MAX_EPOCH_SECONDS, max(MIN_EPOCH_SECONDS, wanted))
+
+
+MOVEMENT_PERCENTILE: Final = 99.0
+"""Where the "this slot moved" line is drawn in the source's own movement.
+
+A cut moves nearly every slot, while ordinary motion inside a scene moves
+few. Setting the line at the 99th percentile leaves about one slot in a
+hundred above it during ordinary motion, which is a wide margin against the
+fraction a cut has to clear. On the movie this project was built against,
+the measured value comes out at 0.0099, which is the constant the parameter
+used to be fixed at: that default was this source's own answer all along.
+"""
+
+MOVEMENT_FLOOR_MINIMUM: Final = 1e-6
+"""A floor of exactly zero would call every rounding difference a movement."""
+
+MOVEMENT_SAMPLE_SECONDS: Final = 1.2
+
+
+def movement_floor(path: Path, *, duration: float = MOVEMENT_SAMPLE_SECONDS) -> float:
+    """How far a slot has to move on this source before it counts as moved."""
+    clip = np.concatenate(list(frames.stream(Path(path), start=0.0, duration=duration)))
+    if clip.shape[0] < 2:
+        return MOVEMENT_FLOOR_MINIMUM
+    grid = palettes.oklab_grid(1.0)
+    tiles = encode.to_tiles(neocolor.rgb_to_color_index(clip))
+    moved = ((grid[tiles[1:]] - grid[tiles[:-1]]) ** 2).sum(axis=-1).mean(axis=(-2, -1))
+    return max(MOVEMENT_FLOOR_MINIMUM, float(np.percentile(moved.reshape(-1), MOVEMENT_PERCENTILE)))

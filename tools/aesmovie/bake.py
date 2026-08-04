@@ -32,6 +32,7 @@ import numpy.typing as npt
 from aesmovie import (
     adpcmb,
     calibrate,
+    content,
     encode,
     fixtiles,
     frames,
@@ -145,6 +146,9 @@ def _fix_defines() -> str:
     }
     return "\n".join(f"#define {macro} {fixtiles.GLYPHS[glyph]}" for glyph, macro in names.items())
 
+
+_PROFILE_SECONDS: Final = 30.0
+"""How much of the source to profile. Long enough to see several cuts."""
 
 _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 #define MOVIE_DATA_H
@@ -719,8 +723,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--target-fps", type=float, default=None)
     parser.add_argument("--motion-masking", type=float, default=0.0)
     parser.add_argument("--chroma-weight", type=float, default=None)
-    parser.add_argument("--scene-cut-floor", type=float, default=0.01)
-    parser.add_argument("--palette-epoch-seconds", type=float, default=5.0)
+    parser.add_argument("--scene-cut-floor", type=float, default=None)
+    parser.add_argument("--palette-epoch-seconds", type=float, default=None)
     parser.add_argument("--tile-budget", type=int, default=None)
     parser.add_argument("--palette-count", type=int, default=240)
     parser.add_argument("--base-bank", type=int, default=16)
@@ -817,6 +821,23 @@ def _resolve_frame_hold(args: argparse.Namespace, tier: quality.Tier | None) -> 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     tier = _resolve_quality(args)
+    profile = content.measure(args.source, duration=_PROFILE_SECONDS)
+    scene_cut_floor = (
+        args.scene_cut_floor
+        if args.scene_cut_floor is not None
+        else content.movement_floor(args.source)
+    )
+    palette_epoch_seconds = (
+        args.palette_epoch_seconds
+        if args.palette_epoch_seconds is not None
+        else content.epoch_seconds_for(cuts_per_minute=profile.cuts_per_minute)
+    )
+    print(
+        f"measured from the source: scene cut floor {scene_cut_floor:.5f},"
+        f" palette epoch {palette_epoch_seconds:.1f}s"
+        f" ({profile.cuts_per_minute:.1f} cuts/min, saturation {profile.saturation:.1f})",
+        file=sys.stderr,
+    )
     frame_hold = _resolve_frame_hold(args, tier)
     tile_budget = quality.CROM_TILES if tier is not None else None
     audio_rate = args.audio_rate
@@ -834,8 +855,8 @@ def main(argv: list[str] | None = None) -> int:
             motion_blur=args.motion_blur,
             motion_masking=args.motion_masking,
             chroma_weight=_pick(args.chroma_weight, tier.chroma_weight if tier else None, 1.0),
-            scene_cut_floor=args.scene_cut_floor,
-            palette_epoch_seconds=args.palette_epoch_seconds,
+            scene_cut_floor=scene_cut_floor,
+            palette_epoch_seconds=palette_epoch_seconds,
             quality=tier.name if tier is not None else args.quality,
             tile_budget=_pick(args.tile_budget, tile_budget, 0),
             palette_count=args.palette_count,

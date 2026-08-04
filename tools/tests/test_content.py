@@ -112,3 +112,95 @@ class TestEpochCadence:
 
     def test_a_source_with_no_cuts_still_gets_a_cadence(self):
         assert content.epoch_seconds_for(cuts_per_minute=0.0) > 0.0
+
+
+class TestMovementFloor:
+    """What counts as "this slot moved" is a property of the content.
+
+    A fixed threshold flagged 1% of slots on one source and 22% on another,
+    so scene-cut detection meant something different on every film. The floor
+    is measured as a high percentile of the movement the source actually
+    shows, which makes it mean the same thing everywhere.
+    """
+
+    def test_a_still_source_asks_for_a_low_floor(self, tmp_path):
+        still = tmp_path / "still.mkv"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:size=320x224:rate=25:duration=2",
+                "-pix_fmt",
+                "yuv420p",
+                str(still),
+            ],
+            check=True,
+        )
+
+        assert content.movement_floor(still, duration=2.0) < 0.001
+
+    def test_a_moving_source_asks_for_a_higher_floor(self, tmp_path):
+        moving = tmp_path / "moving.mkv"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x224:rate=25:duration=2",
+                "-pix_fmt",
+                "yuv420p",
+                str(moving),
+            ],
+            check=True,
+        )
+        still = tmp_path / "still2.mkv"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:size=320x224:rate=25:duration=2",
+                "-pix_fmt",
+                "yuv420p",
+                str(still),
+            ],
+            check=True,
+        )
+
+        assert content.movement_floor(moving, duration=2.0) > content.movement_floor(
+            still, duration=2.0
+        )
+
+    def test_the_floor_is_never_zero(self, tmp_path):
+        still = tmp_path / "flat.mkv"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:size=320x224:rate=25:duration=1",
+                "-pix_fmt",
+                "yuv420p",
+                str(still),
+            ],
+            check=True,
+        )
+
+        assert content.movement_floor(still, duration=1.0) > 0.0

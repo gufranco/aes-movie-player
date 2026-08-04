@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from aesmovie import adpcmb, bake, quality, stream
+from aesmovie import adpcmb, bake, content, quality, stream
 from aesmovie import frames as frames_mod
 
 _spec = importlib.util.spec_from_file_location(
@@ -657,9 +657,11 @@ class TestQualityResolution:
 
 class TestPaletteEpochFlag:
     def test_epochs_are_on_by_default(self):
+        """No flag means the cadence is measured, not that epochs are off."""
         args = bake._parse_args(["--source", "clip.mp4", "--duration", "1"])
 
-        assert args.palette_epoch_seconds > 0.0
+        assert args.palette_epoch_seconds is None
+        assert content.epoch_seconds_for(cuts_per_minute=6.0) > 0.0
 
     def test_epochs_can_be_switched_off(self):
         args = bake._parse_args(
@@ -839,6 +841,12 @@ class TestTheOverlayNamesTheRungActuallyUsed:
     def test_the_word_auto_never_reaches_the_header(self, monkeypatch):
         chosen = quality.tier_by_name("q07")
         monkeypatch.setattr(bake, "_resolve_quality", lambda *_args: chosen)
+        monkeypatch.setattr(
+            bake.content,
+            "measure",
+            lambda *_args, **_kwargs: content.ContentProfile(saturation=10.0, cuts_per_minute=6.0),
+        )
+        monkeypatch.setattr(bake.content, "movement_floor", lambda *_args, **_kwargs: 0.01)
         captured: dict[str, object] = {}
 
         def capture(request):
