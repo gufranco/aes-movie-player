@@ -1,39 +1,122 @@
+<div align="center">
+
 # AES Movie Player
 
-Play a real movie on a stock Neo Geo AES. Full screen at 320x224, colour,
-mono soundtrack, and a working transport: play, pause, fast forward at 2x,
-5x and 10x, rewind, and seek.
+<strong>A real movie, full screen with sound, on a stock Neo Geo AES.</strong>
 
-The console has no video decoder, no framebuffer, and no scaler. It draws
-hardware sprites and that is all. So the movie is not decoded on the
-console at all. An offline baker turns a video file into cartridge ROM
-images, and the on-cart player does nothing at runtime but push pre-computed
-tile numbers into sprite control blocks once per vblank.
+<br>
 
-A ten minute movie fits in a 158 MB cartridge, plays every frame at 59.2 fps
-with sound, and reproduces bit-exactly what the baker predicted.
+[![Licence](https://img.shields.io/badge/licence-GPL--3.0-blue?style=flat-square)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-627%20passing-brightgreen?style=flat-square)](tools/tests)
+[![Target](https://img.shields.io/badge/target-Neo%20Geo%20AES-red?style=flat-square)](#hardware-ceilings)
+[![Verified](https://img.shields.io/badge/verified-geolith%20%2B%20MAME-blueviolet?style=flat-square)](#verification)
 
-## Contents
+</div>
 
-- [How it works](#how-it-works)
-- [Hardware ceilings](#hardware-ceilings)
-- [The quality system](#the-quality-system)
-- [Per-scene palettes](#per-scene-palettes)
-- [Rate control](#rate-control)
-- [Colour](#colour)
-- [Usage](#usage)
-- [Verification](#verification)
-- [What did not work](#what-did-not-work)
-- [Hardware notes worth knowing](#hardware-notes-worth-knowing)
-- [State of the work](#state-of-the-work)
-- [Repository layout](#repository-layout)
+<p align="center">
+  <a href="#how-it-works"><strong>How it works</strong></a> &nbsp;|&nbsp;
+  <a href="#quick-start"><strong>Quick start</strong></a> &nbsp;|&nbsp;
+  <a href="#verification"><strong>Verification</strong></a> &nbsp;|&nbsp;
+  <a href="#what-did-not-work"><strong>What did not work</strong></a> &nbsp;|&nbsp;
+  <a href="#state-of-the-work"><strong>State of the work</strong></a>
+</p>
+
+<div align="center">
+
+**158 MB** cartridge · **35,274** frames · **59.2** fps · **846,784** tiles · **81%** of the C-ROM ceiling · **627** tests
+
+<br>
+
+<img src="docs/screenshot.png" alt="Big Buck Bunny running from the cartridge at 320x224, captured from MAME" width="640">
+
+<sub>Captured from MAME running the built cartridge, upscaled 2x with nearest neighbour. The black left column is MAME's own, and is <a href="#verification">measured and explained below</a>.</sub>
+
+</div>
+
+---
+
+## The problem
+
+The Neo Geo has no video decoder, no framebuffer, and no scaler. It draws
+hardware sprites and that is all. There is nowhere to put a decoded picture,
+and nothing to decode it with: the 68000 runs at 12 MHz and has to hold 59.2
+frames a second while the sound chip streams underneath it.
+
+Worse, there are no residuals. A codec normally fixes a bad prediction by
+adding a difference to what is already on screen. With no framebuffer there
+is nothing to add to. A correction can only point a slot at some tile that
+already exists.
+
+## The solution
+
+Do not decode on the console at all. An offline baker turns the video into
+cartridge ROM images, and the on-cart player does nothing at runtime but push
+pre-computed tile numbers into sprite control blocks once per vblank.
+
+The screen is a fixed grid of 20 by 14 sprite tiles, 280 slots of 16x16
+pixels covering the 320x224 raster. Every distinct tile the whole movie needs
+is interned once into a global dictionary in character ROM. A frame is then
+just a list of assignments: slot 137 now shows tile 90412. There is no
+decompression step, because a tile number *is* the decoded form.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### Zero runtime decoding
+
+The player pushes tile numbers into SCB1 and nothing else. A frame that
+changes nothing costs two bytes.
+
+</td>
+<td width="50%" valign="top">
+
+### A measured quality ladder
+
+35 rungs, each one measured on the source rather than guessed. A rung that
+costs more than its neighbour and looks no better does not appear.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### Palettes refit per scene
+
+240 CRAM banks refit per epoch and double-buffered across the hundreds of
+frames an epoch lasts. About 6% less error for 1.5% more tiles.
+
+</td>
+<td width="50%" valign="top">
+
+### Bit-exact against geolith
+
+A frame reconstructed from the cartridge's own bytes matches what the
+emulator drew, pixel for pixel, 0.0000 error.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### Timing checked per instruction
+
+Every build disassembles the player and fails on any VRAM write pair under
+the documented cycle minimum. The one defect class emulators cannot show.
+
+</td>
+<td width="50%" valign="top">
+
+### A working transport
+
+Play, pause, fast forward at 2x, 5x and 10x, rewind, and seek, with audio
+re-pointed to the matching ADPCM page on every jump.
+
+</td>
+</tr>
+</table>
 
 ## How it works
-
-The screen is a fixed grid of 20 by 14 hardware sprite tiles, 280 slots of
-16x16 pixels covering the 320x224 raster. Every distinct tile the whole
-movie needs is interned once into a global dictionary in character ROM.
-A frame is then just a list of assignments: slot 137 now shows tile 90412.
 
 ```mermaid
 flowchart LR
@@ -50,8 +133,7 @@ flowchart LR
 ```
 
 At runtime the player reads the next frame's commands and writes them
-straight to sprite control block 1. There is no decompression step, because
-a tile number *is* the decoded form.
+straight to sprite control block 1.
 
 ```mermaid
 flowchart LR
@@ -72,11 +154,9 @@ of 280.
 can jump anywhere by finding the nearest keyframe in an index and replaying
 from there. A ten minute movie carries 716 of them.
 
-**There are no residuals.** With no framebuffer, a correction cannot add a
-difference to what is on screen. It can only point a slot at some tile that
-already exists in the dictionary. Picture quality is therefore dictionary
-richness, and dictionary richness is character ROM. That single fact shapes
-every design decision below.
+**There are no residuals.** Picture quality is therefore dictionary richness,
+and dictionary richness is character ROM. That single fact shapes every
+design decision below.
 
 ## Hardware ceilings
 
@@ -91,11 +171,80 @@ Read from the source of two independent emulators rather than from prose.
 | Palettes | 256 banks of 16 colours, index 0 transparent | 240 for video, 16 reserved for the menu |
 | Watchdog | about 0.13 seconds | Bounds any initialisation loop |
 
-**There is no character-ROM bankswitching, and there cannot be.** Neither
-geolith nor MAME implements it on any board, including every bootleg mapper
-MAME carries, and the arithmetic forbids it: 2^20 tiles at 128 bytes each is
-exactly the 128 MiB the tile number addresses. 128 MiB is an absolute
-ceiling, not a window. An early design assumed 8 banks of it and was wrong.
+> [!IMPORTANT]
+> **There is no character-ROM bankswitching, and there cannot be.** Neither
+> geolith nor MAME implements it on any board, including every bootleg mapper
+> MAME carries, and the arithmetic forbids it: 2^20 tiles at 128 bytes each is
+> exactly the 128 MiB the tile number addresses. 128 MiB is an absolute
+> ceiling, not a window. An early design assumed 8 banks of it and was wrong.
+
+## Quick start
+
+### Prerequisites
+
+| Tool | Version | Install |
+|:-----|:--------|:--------|
+| Python | >= 3.12 | [python.org](https://www.python.org) |
+| uv | latest | [docs.astral.sh/uv](https://docs.astral.sh/uv/) |
+| ffmpeg and ffprobe | any recent | [ffmpeg.org](https://ffmpeg.org) |
+| m68k toolchain | ngdevkit | see [Toolchain](#toolchain) below |
+| Neo Geo BIOS | any | required by the emulators only |
+
+### Bake and build
+
+```bash
+# what could this source become?
+uv --project tools run python -m aesmovie.plan --source film.mkv
+
+# bake at the tier it picks
+uv --project tools run python -m aesmovie.bake \
+    --source film.mkv --start 0 --duration 596 --quality auto \
+    --build-dir build --preview build/preview.mp4
+
+# build the cartridge
+bash toolchain/build-in-docker.sh
+```
+
+### Verify
+
+```bash
+bash tools/scripts/verify_mame.sh
+```
+
+The build emits a `.neo` for flash carts and emulators plus a MAME
+software-list archive, and prints the spacing check on the way through:
+
+```
+CHECK VRAM write spacing
+VRAM write spacing clears the 12 and 16 cycle minimums across 2 object(s)
+```
+
+`--quality` takes a tier name or `auto`. Individual flags such as
+`--chroma-weight` override the tier, and the tier overrides the defaults.
+`--target-fps` states a wanted frame rate instead of a hold, and the baker
+refuses a hold that would drop no source frame rather than silently doing
+nothing.
+
+### Toolchain
+
+The cartridge needs an `m68k-neogeo-elf` toolchain. Ubuntu takes it from
+ngdevkit's PPA, which publishes amd64 only. Apple Silicon takes it natively
+from the Homebrew tap:
+
+```bash
+brew install --force-bottle dciabrin/ngdevkit/ngdevkit-toolchain \
+                            dciabrin/ngdevkit/ngdevkit
+```
+
+> [!TIP]
+> `--force-bottle` is what pours the arm64 bottle on a macOS release the tap
+> has not tagged yet. Without it Homebrew builds GCC from source.
+
+[`build-in-docker.sh`](toolchain/build-in-docker.sh) compiles directly when a
+toolchain is on the path and re-executes itself in a container only when one
+is not, so a machine with the toolchain installed never pays for the
+container. That fallback path is amd64 under emulation, because the PPA has
+no arm64 build.
 
 ## The quality system
 
@@ -148,11 +297,10 @@ Calibration takes under a minute where a bake takes hours.
 
 The thirty-five rungs are not an arbitrary subdivision. Each one was measured,
 and the ladder keeps only the settings that were not beaten on both axes at
-once: a rung that costs more than its neighbour and looks no better does
-not appear. That is why colour falls in uneven steps and why frame rate
-only starts dropping at `q31`, once cheapening colour further has stopped
-buying anything. An earlier hand-picked ladder had a rung that was strictly
-worse than the one below it, which is the failure this ordering removes.
+once. That is why colour falls in uneven steps and why frame rate only starts
+dropping at `q31`, once cheapening colour further has stopped buying
+anything. An earlier hand-picked ladder had a rung that was strictly worse
+than the one below it, which is the failure this ordering removes.
 
 The levers, in order of how much they cost perceptually:
 
@@ -179,7 +327,12 @@ bake, 3 windows read 0.62 times the true rate, 6 read 1.58, and 12 read
 what converges. The default of 24 short windows lands within a percent, for
 72 seconds of sampling.
 
-## Per-scene palettes
+<details>
+<summary><strong>Per-scene palettes, rate control, and colour</strong></summary>
+
+<br>
+
+### Per-scene palettes
 
 CRAM holds 240 palettes for video, and one set stretched over a whole
 feature has to cover every scene in it. The baker instead cuts the movie
@@ -187,12 +340,12 @@ into epochs and refits colours for each, which measures about 6% less error
 on real footage for 1.5% more tiles.
 
 The set has to reach CRAM before the scene it belongs to appears, and a full
-set is around 17,900 cycles against a vblank of roughly 30,700, so it cannot
-be written in one frame. Epochs therefore alternate between the two halves
-of the allocation: while one half is being read, the next epoch is written
-into the other, a slice per frame across the hundreds of frames an epoch
-lasts. Seeks and rewinds have no run-up, so they make the target epoch
-resident at once.
+set is around 17,900 cycles against the 18,432 the blanking interval actually
+affords, so it cannot be written in one frame alongside the picture. Epochs
+therefore alternate between the two halves of the allocation: while one half
+is being read, the next epoch is written into the other, a slice per frame
+across the hundreds of frames an epoch lasts. Seeks and rewinds have no
+run-up, so they make the target epoch resident at once.
 
 Epochs never share dictionary entries. A tile stores palette indices rather
 than colours, so one interned while a bank held one epoch's colours draws
@@ -205,7 +358,7 @@ so they survive seeking and reverse playback.
 
 Set `--palette-epoch-seconds 0` to go back to a single shared set.
 
-## Rate control
+### Rate control
 
 A tier is chosen from a sample, and a sample cannot know that the third act
 is busier than the first. Left alone the dictionary runs out partway through
@@ -239,7 +392,7 @@ wanted:
 The integral form also never reaches the cap at any budget, where the first
 one hit it every time.
 
-## Colour
+### Colour
 
 The Neo Geo colour word is `|D0|R1|G1|B1|R5R4R3R2|G5G4G3G2|B5B4B3B2|`: five
 independent bits per channel plus `D0`, a sixth bit shared across all three.
@@ -255,34 +408,7 @@ Distance is measured in Oklab throughout, so palette fitting, tile
 assignment, redraw decisions, and the fidelity metric all agree on what
 "close" means.
 
-## Usage
-
-```bash
-# what could this source become?
-uv --project tools run python -m aesmovie.plan --source film.mkv
-
-# bake at the tier it picks
-uv --project tools run python -m aesmovie.bake \
-    --source film.mkv --start 0 --duration 596 --quality auto \
-    --build-dir build --preview build/preview.mp4
-
-# build the cartridge
-bash toolchain/build-in-docker.sh
-
-# check it against both emulators
-bash tools/scripts/capture_rom.sh 900 build/capture.png
-bash tools/scripts/verify_mame.sh
-```
-
-`--quality` takes a tier name or `auto`. Individual flags such as
-`--chroma-weight` override the tier, and the tier overrides the defaults.
-`--target-fps` states a wanted frame rate instead of a hold, and the baker
-refuses a hold that would drop no source frame rather than silently doing
-nothing.
-
-The build emits a `.neo` for flash carts and emulators plus a MAME
-software-list archive. On non-Linux hosts it re-executes itself in a
-container.
+</details>
 
 ## Verification
 
@@ -307,9 +433,6 @@ MAME returns column 0 black across all 224 rows, which geolith's overscan
 crop had been hiding. Excluding it, the residual is a smooth per-level
 difference, the signature of a different digital-to-analog model rather than
 a structural disagreement. Both are emulator-side.
-
-The full-length bake is recorded under
-[State of the work](#state-of-the-work), so it is not repeated here.
 
 ## What did not work
 
@@ -382,7 +505,10 @@ port, where one write per word is already the floor.
 The fix layer has 32 rows but the raster only shows rows 2 to 29, so an
 overlay anchored to row 27 floats two rows above the bottom edge.
 
-### Checked against documentation rather than against an emulator
+<details>
+<summary><strong>Checked against documentation rather than against an emulator</strong></summary>
+
+<br>
 
 Two emulators agreeing is weaker evidence than it looks: both can share a
 tolerance the hardware does not have. These points come from the NeoGeo
@@ -392,11 +518,12 @@ Development Wiki's VRAM page.
 |---|---|
 | Address port `$3C0000`, data `$3C0002`, modulo `$3C0004`, signed auto-increment after write | Confirmed |
 | Writing VRAM during active display | **Permitted.** "VRAM can be modified even during active display", so frames that overrun vblank are not a hardware fault |
-| At least 12 CPU cycles between consecutive data writes, >24 mclk | Documented, **not yet verified in our output** |
-| At least 16 CPU cycles after a write before setting a new address | Documented, **not yet verified in our output** |
-| Bit 15 of `$3C0006` low means vblank | **Unverified.** Rests on the code working under two emulators, not on a source read |
+| At least 12 CPU cycles between consecutive data writes, >24 mclk | **Verified on every build.** The tightest pair leaves 20 |
+| At least 16 CPU cycles after a write before setting a new address | **Verified on every build.** The tightest pair leaves 20 |
+| At least 16 CPU cycles after setting an address before a read | Not applicable. The player never reads VRAM |
+| Bit 15 of `$3C0006` low means vblank | **Wrong.** The read is a raster line counter, and bit 15 is low for 8 scanlines out of 264 |
 
-The cycle spacing is the live risk. `apply_frame` writes back to back:
+The cycle spacing was the live risk. `apply_frame` writes back to back:
 
 ```c
 while (tiles--) {
@@ -405,13 +532,96 @@ while (tiles--) {
 }
 ```
 
-On a 68000 `move.w (An)+,(An)` costs 12 cycles, exactly the documented
-minimum with no margin, while `move.w (An)+,(xxx).L` costs 20 and is safe.
-Which one the compiler emits decides whether the loop is correct on a board,
-and the wiki notes that going too fast is what makes overclocked systems
-glitch. Disassembling `apply_frame` settles it; that has not been done.
+The worry was `move.w (An)+,(An)`, which costs 12 cycles and sits exactly on
+the documented minimum with no margin. GCC emits something else:
 
-### Encodings read from the decoders, not guessed
+```
+226:  moveal #3932162,%a1     12
+22c:  movew  %a0@,%a1@        12   data write
+22e:  addql  #4,%a0            8
+230:  movew  %a0@(-2),%a1@    16   data write
+234:  cmpl   %a0,%d0           6
+236:  bnes   226              10
+```
+
+Twenty cycles separate the two writes, the loop's back edge puts 36 between
+the second write and the first of the next tile, and leaving the loop for the
+next run's address write costs 88. Both minimums clear with margin, so
+`apply_frame` needs no change. The compiler reloads the port address every
+iteration, which wastes 12 cycles per tile and happens to widen the gap.
+
+The same walk covers every other VRAM write in the player: the two
+`clear_vram` fills, the sprite grid, and the whole fix-layer overlay. One
+pair failed it. `draw_seek_bar` drew the bar's right cap and then the knob,
+and the compiler hoisted the knob's operands above the loop, so the two
+`vram_poke` calls came out back to back with 12 cycles between the cap's data
+write and the knob's address write, where 16 are required. Folding the knob
+into the loop as one more tile choice drops the trailing write entirely and
+costs one cell fewer to draw. The tightest pair anywhere is now 20 cycles.
+
+Nothing in the C source holds that result, because C cannot express
+instruction spacing. A check holds it instead.
+[`check_vram_timing.py`](tools/scripts/check_vram_timing.py) walks the
+compiled objects, models each write as its bus cycles rather than as an
+instruction, follows branches across the whole reachable window, and fails on
+any pair under the floor. It reported this defect before the fix and passes
+after it, and it runs right after the compile step in
+[`build-in-docker.sh`](toolchain/build-in-docker.sh) so a future compiler
+cannot quietly undo the result.
+
+None of this needs a container. The toolchain installs natively on Apple
+Silicon from ngdevkit's Homebrew tap, and the objects it produces are
+byte-identical to the ones the container built.
+
+</details>
+
+<details>
+<summary><strong>The vblank bit is a line counter, and the player only gets its tail</strong></summary>
+
+<br>
+
+The last unverified row above did not survive a source read. `$3C0006` on
+read is a raster line counter rather than a flag. geolith builds it as
+`((scanline + 0xf8) << 7) | aa_counter`; MAME builds it as `(v_counter << 7)`
+over a chain its own comment describes as going "from 0xf8 - 0x1ff". Two
+codebases sharing nothing produce the same register, and the wiki's register
+table agrees, calling it the raster line counter.
+
+Bit 15 is bit 8 of that counter. It is low for counter values `0xF8` to
+`0xFF` and high for `0x100` to `0x1FF`, so it marks 8 scanlines out of 264,
+not a blanking interval.
+
+`wait_vblank` waits for the edge into those 8 lines. It does synchronise once
+per frame, which is why the player runs correctly, but it does not hand the
+frame a blanking interval to work in. It returns with 8 scanlines left before
+geolith resumes drawing, 6,144 cycles at 768 cycles a line, and 24 before
+MAME's visible region starts. A keyframe rewriting all 280 slots costs
+roughly 18,000 cycles on the loop measured above, so it runs past that point
+every time. The hardware permits the overrun, per the row above, and this is
+what `OVERRUN` counts. It is not counting lost frames, which is why the frame
+counters stayed flat while it reported 20%.
+
+The counter reads out whole in bits 15 to 7, so the start of the interval is
+available without knowing anything new about the board. `wait_vblank` now
+waits for that edge instead, which hands each frame all 24 blanking lines
+rather than the last 8. Measured under MAME on the same cartridge, 60
+emulated seconds each, reading the player's own counters:
+
+| Sync point | Frames | Overruns | Rate |
+|---|---|---|---|
+| Bit 15, the last 8 lines | 2,743 | 631 | 23.0% |
+| Start of blanking | 2,743 | 64 | 2.3% |
+
+The frame count is identical, so nothing was gained or lost in the trade. The
+23% also matches the 20% the diagnostics build reported before any of this,
+which is the check that the two measurements are of the same thing.
+
+</details>
+
+<details>
+<summary><strong>Encodings read from the decoders, not guessed</strong></summary>
+
+<br>
 
 Every bit layout below was read out of an emulator's source rather than from
 a prose summary. Where geolith and MAME agree, they are two implementations
@@ -455,13 +665,12 @@ default, so a capture shows 304 of the 320 active columns unless zeroed.
 - **C-ROM banking does not exist**, as the ceilings table above records.
   Both emulators agree by omission: neither implements it on any board.
 
-One consequence shapes the whole encoder: there is no framebuffer, so there
-are no additive residuals. A correction cannot nudge a pixel, it can only
-point a slot at a tile that already exists in the dictionary. Every codec
-technique that assumes a residual path, motion masking among them, fails
-here for that reason.
+</details>
 
-### Prior art the design draws on
+<details>
+<summary><strong>Prior art the design draws on</strong></summary>
+
+<br>
 
 - **Resident Evil 2 on the Nintendo 64.** Angel Studios fit a two-CD, 1.2 GB
   game into 64 MiB with 15 minutes of video in a 24 MiB budget, a 165:1
@@ -480,6 +689,8 @@ here for that reason.
   minutes in roughly 3 MB. One bit and one palette, so tile dedup is
   best-case, but it proves tile-streamed video with synced audio on real
   hardware. [yAronet](https://www.yaronet.com/topics/188010-bad-apple-demo-datlibdatimageneosoundbuilder)
+
+</details>
 
 ## State of the work
 
@@ -501,6 +712,12 @@ every parameter measured from the source rather than fixed.
 | Audio | 55,555 Hz, the chip's ceiling |
 | Displayed error | 0.001006 |
 
+The overlay font covers upper and lower case, digits and punctuation: 83
+glyphs drawn as text art, 2,656 bytes of the 128 KiB S-ROM. Lowercase was
+appended after the existing glyphs, so every tile index the player and the
+baked subtitle records already used is unchanged, and a subtitle now keeps
+the case it was written in rather than folding to capitals.
+
 ### Audio and video are locked
 
 Read off the player's own diagnostics page, which is the only measurement
@@ -517,47 +734,66 @@ before the movie starts rather than drift. The diagnostics build reads 17
 because it draws an extra row of text every frame. Audio starts immediately
 after frame 0 is applied and the YM2610 then streams on its own from the
 same crystal as the raster, so there is no mechanism left to separate them.
-`OVERRUN` reaches 20% of frames, which costs no frames and, per the section
-above, is permitted by the hardware.
+`OVERRUN` reached 20% of frames on those builds and 2.3% once `wait_vblank`
+was moved to the start of the blanking interval. Neither figure costs a
+frame, and per the section above the hardware permits the writes either way.
 
 Residual error: 3 ms from the ADPCM rate grid across ten minutes, 3 ms from
 the frame-to-page mapping, and up to 4.6 ms rounding on each seek.
 
-### Do not trust `measure_drift.py` at depth
+The cartridge on disk was rebuilt after the seek-bar fix. Only the overlay
+changed: `main.o` disassembles identically to the build the emulator
+comparison above was run against, so the video path is the same bytes and
+that comparison still stands. The overlay itself has not been re-captured.
 
-It matches correctly up to about 12,000 frames and then returns confident
-wrong answers. It reported the player 662 frames behind once and 720 behind
-another time; the counters showed 8 and 17. One real bug in it was fixed, a
-run of pixel-identical frames on a static shot resolving to the earliest
-rather than the nearest, but that was not the cause and the cause is still
-unknown. Verify deep frames by reading the on-screen counters instead: build
-with `debug_visible = 1` and capture.
+<details>
+<summary><strong><code>measure_drift.py</code> now refuses the answers it used to invent</strong></summary>
+
+<br>
+
+It reported the player 662 frames behind once and 720 behind another time;
+the counters showed 8 and 17. The cause was not a coding bug but the method.
+The tool takes the frame whose reconstruction is closest to the capture, and
+over a wide window a feature contains frames that resemble each other more
+than the emulator's own residual separates them. Argmin then lands on a
+distant frame and reports it with no less confidence than a true match. Both
+bad readings came from runs with a window wide enough to reach that far,
+which is also why it looked reliable at shallow depths.
+
+It now scores every candidate, finds the best match, sets aside the run of
+pixel-identical frames around it, and looks at the closest rival outside that
+run. When the rival is within `--min-separation` of the best, default 1.0 of
+255, the scan prints both and returns nothing rather than choosing. A guess
+that announces itself as a guess is the part that was missing.
+
+The on-screen counters remain the better instrument, and they are what the
+measurements above were read from: build with `debug_visible = 1` and
+capture.
+
+</details>
 
 ### What is left
 
-1. **Disassemble `apply_frame`** and confirm the VRAM write spacing meets the
-   12 and 16 cycle minimums. Highest value, because it is the one defect
-   class the emulators cannot show.
-2. **Verify the vblank bit** against a documented source.
-3. **Fix or delete `measure_drift.py`.** A measurement that lies is worse
-   than none.
-4. **Gradient blocking.** Visible on flat areas such as the closing card.
+1. **Gradient blocking.** Visible on flat areas such as the closing card.
    Dithering the source before quantisation was tried and does nothing,
    because the banding comes from the fifteen colours a tile may use rather
-   than from the colour word. Dithering where pixels are matched to a
-   palette is the untried version, alongside a smoothness-aware tolerance
-   that spends more budget where the picture is flat, since that is where
-   blocks show.
-5. **Lowercase subtitle glyphs.** The pipeline works end to end and is
-   verified on screen; the font is uppercase plus comma, apostrophe,
-   question and exclamation. The remaining work is 26 hand-drawn 8x8
-   glyphs with descenders in a cell that leaves four rows of x-height.
-6. **A tier above `q17`.** The ladder runs up to `q01` and the bake stops at
+   than from the colour word. Dithering where pixels are matched to a palette
+   is the untried version, and the dictionary rules out the obvious form of
+   it. Error diffusion makes a tile's output depend on its neighbours, so two
+   identical source tiles stop quantising alike and stop interning as one,
+   which spends the C-ROM the whole design is short of. An ordered threshold
+   whose period divides 16 has neither problem: it depends only on where a
+   pixel sits inside its own tile, and it still runs continuously across tile
+   boundaries. It fits the existing lookup as a second-nearest entry and a
+   blend fraction beside the nearest one already precomputed per palette and
+   colour. Whether it beats the banding is a question for a person and a full
+   bake, since the metric already proved it ranks smearing highest.
+2. **A tier above `q17`.** The ladder runs up to `q01` and the bake stops at
    `q17` because that is the highest rung fitting 9:56 untrimmed. `q16`
    needs about 24 seconds trimmed. Each step is a fresh 40 minute bake and
    the trim is an editorial decision, so it waits for a call rather than a
    measurement.
-7. **Real hardware.** Nothing here has run on an AES. Until it does, every
+3. **Real hardware.** Nothing here has run on an AES. Until it does, every
    hardware claim has to come from documentation or emulator source, never
    from two emulators agreeing.
 
@@ -585,6 +821,65 @@ Requests that outlive any single change.
   `measure_drift.py` above. Reporting a regression that a stale capture
   invented happened twice in one session.
 
+## FAQ
+
+<details>
+<summary><strong>Why not just use a video codec?</strong></summary>
+<br>
+
+There is nothing to run it on. The console has no video decoder and no
+framebuffer, and the 68000 at 12 MHz has roughly 18,000 cycles of blanking
+per frame, which is about what rewriting the screen once already costs. Every
+codec technique that assumes a residual path fails here, because a correction
+cannot nudge a pixel. It can only point a slot at a tile that already exists.
+
+</details>
+
+<details>
+<summary><strong>Has this run on a real AES?</strong></summary>
+<br>
+
+No. Every hardware claim comes from documentation or from emulator source,
+never from two emulators agreeing, because both can share a tolerance the
+hardware does not have. The instruction-level timing check exists precisely
+because it covers the one defect class an emulator cannot show.
+
+</details>
+
+<details>
+<summary><strong>How long does a bake take?</strong></summary>
+<br>
+
+Hours for a full feature. Calibration takes under a minute, which is why
+[the quality system](#the-quality-system) measures the source first and
+prints every rung with its exact overshoot before anything commits to a bake.
+
+</details>
+
+<details>
+<summary><strong>Can I use my own movie?</strong></summary>
+<br>
+
+Yes. Point `--source` at any file ffmpeg reads. The plan step measures it and
+picks a tier; how much runtime fits depends entirely on how much novel detail
+the content carries, not on its length alone. Audio caps at about 10 minutes
+at the chip's 55.6 kHz ceiling, and longer sources get the highest rate that
+still ends on an addressable page.
+
+</details>
+
+<details>
+<summary><strong>Why is the picture 320 pixels wide when real cartridges use 304?</strong></summary>
+<br>
+
+Because narrowing it costs tiles instead of saving them. Blanking 16 pixels
+on each side of a test window moved the tile count *up*, from 35,136 to
+35,779, while blanking the same 32 pixels down the middle took it to 30,098.
+Cost follows novel detail, and framing puts the detail in the middle. The
+full measurement is under [What did not work](#what-did-not-work).
+
+</details>
+
 ## Repository layout
 
 | Path | Contents |
@@ -592,14 +887,8 @@ Requests that outlive any single change.
 | [`src/`](src) | The 68000 player, the fix-layer menu, and the Z80 sound driver |
 | [`tools/aesmovie/`](tools/aesmovie) | The baker: decode, colour, palettes, dictionary, encoder, quality ladder, audio, ROM containers |
 | [`tools/tests/`](tools/tests) | Test suite, including the emulator transcriptions used as oracles |
-| [`tools/scripts/`](tools/scripts) | Capture and verification helpers |
-| [`toolchain/`](toolchain) | The containerised ngdevkit build |
-
-## Requirements
-
-ffmpeg and ffprobe on the path, [uv](https://docs.astral.sh/uv/) for the
-Python side, Docker on non-Linux hosts, and a Neo Geo BIOS for the
-emulators. Python 3.12 or newer.
+| [`tools/scripts/`](tools/scripts) | Capture, verification, and timing helpers |
+| [`toolchain/`](toolchain) | The ngdevkit build, native or containerised |
 
 ## Licence
 
