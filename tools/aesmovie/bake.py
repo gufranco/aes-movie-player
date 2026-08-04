@@ -49,10 +49,23 @@ V_ROM_MIN_BYTES: Final = 1 << 19
 MAX_SAMPLE_TILES: Final = 200_000
 _SCENE_CUT_SHARE: Final = 0.6
 
-# The player writes 48 palette words a frame, and an epoch holds 120
-# palettes of 16 words, so a new set takes 40 frames to become resident.
-# Three times that leaves room for the transport to be redrawing too.
-MIN_EPOCH_FRAMES: Final = 120
+PALETTE_WORDS_PER_FRAME: Final = 48
+"""How many colour words the player uploads per frame.
+
+The figure is a vblank budget rather than a preference, and the baker has to
+agree with it: an epoch shorter than the upload of the one after it shows a
+half-written palette. It is emitted into the header so the player reads this
+value rather than keeping a second copy of it.
+"""
+
+EPOCH_UPLOAD_MARGIN: Final = 3
+"""How many upload times an epoch must last.
+
+One would be the bare minimum and would leave nothing for the frames where
+the transport or the diagnostics page is also writing to the fix layer.
+"""
+
+WORDS_PER_PALETTE: Final = 16
 FIX_PALETTE_BANK: Final = 1
 S_ROM_BYTES: Final = 131072
 
@@ -159,6 +172,7 @@ _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 #define MOVIE_PALETTE_BASE {base_bank}
 #define MOVIE_EPOCH_COUNT {epochs}
 #define MOVIE_EPOCH_PALETTES {epoch_palettes}
+#define MOVIE_EPOCH_SLICE {epoch_slice}u
 #define MOVIE_IMAGE_WIDTH {image_width}
 #define MOVIE_IMAGE_HEIGHT {image_height}
 #define MOVIE_TIER_NAME "{tier_name}"
@@ -226,7 +240,13 @@ class BakeRequest:
     palette_epoch_seconds: float = 5.0
     quality: str | None = None
     tile_budget: int = 0
-    audio_rate_hz: float = 22050.0
+    audio_rate_hz: float | None = None
+    """Sample rate for the voice ROM, or None to take the highest that fits.
+
+    There is no sensible constant here. The ceiling is the chip's, the floor
+    is however slow the sample has to run to end on an addressable page, and
+    which of the two applies depends entirely on how long the movie is.
+    """
     audio: bool = True
 
 
@@ -320,7 +340,9 @@ def _write_sources(
     outcome_paths: dict[str, Path],
     result: encode.EncodeResult,
     request: BakeRequest,
+    *,
     audio_pages: Fraction = Fraction(0),
+    audio_hz: float = 0.0,
 ) -> tuple[Path, Path]:
     generated = build_dir / "generated"
     generated.mkdir(parents=True, exist_ok=True)
@@ -346,12 +368,13 @@ def _write_sources(
             palettes=len(result.palette_set),
             epochs=len(result.palette_sets),
             epoch_palettes=len(result.palette_sets[0]),
+            epoch_slice=PALETTE_WORDS_PER_FRAME,
             image_width=encode.FRAME_WIDTH,
             image_height=encode.FRAME_HEIGHT,
             tier_name=self_tier_name(request),
             chroma_percent=round(request.chroma_weight * 100),
             crom_percent=round(100 * result.stats.crom_payload_bytes / CROM_BANK_BYTES),
-            audio_hz=round(request.audio_rate_hz),
+            audio_hz=round(audio_hz),
             frame_hold=request.frame_hold,
             base_bank=result.palette_set.base_bank,
             keyframes=result.stats.keyframe_count,
@@ -535,8 +558,28 @@ def _epoch_blob(result: encode.EncodeResult) -> bytes:
     return np.asarray(result.epoch_starts, dtype=">u4").tobytes()
 
 
+def epoch_upload_frames(palette_count: int) -> int:
+    """Frames the player needs to make one epoch's colours resident.
+
+    Epochs alternate between the two halves of the video palette allocation,
+    so a set is half the palettes, and the upload runs at a fixed number of
+    words per frame. Computing it here keeps the baker and the player from
+    disagreeing about a number that, if they do, shows a half-written palette
+    on screen.
+    """
+    words = (palette_count // 2) * WORDS_PER_PALETTE
+    upload = -(-words // PALETTE_WORDS_PER_FRAME)
+    return upload * EPOCH_UPLOAD_MARGIN
+
+
 def _epoch_starts(
-    grids: npt.NDArray[np.uint16], step: int, stride: int, total: int, floor: float
+    grids: npt.NDArray[np.uint16],
+    step: int,
+    stride: int,
+    total: int,
+    *,
+    floor: float,
+    minimum: int,
 ) -> list[int]:
     """Where epochs begin: at scene cuts, falling back to a fixed cadence.
 
@@ -571,7 +614,7 @@ def _epoch_starts(
     # final list is what has to be thinned.
     spaced: list[int] = []
     for start in filled:
-        if not spaced or start - spaced[-1] >= MIN_EPOCH_FRAMES:
+        if not spaced or start - spaced[-1] >= minimum:
             spaced.append(start)
     return spaced
 
@@ -594,7 +637,10 @@ def _epoch_samples(
     stride = max(1, request.sample_stride)
     total = frames.frame_count(seconds=request.duration)
     buckets: list[tuple[int, npt.NDArray[np.uint16]]] = []
-    for start in _epoch_starts(grids, step, stride, total, request.scene_cut_floor):
+    minimum = epoch_upload_frames(request.palette_count)
+    for start in _epoch_starts(
+        grids, step, stride, total, floor=request.scene_cut_floor, minimum=minimum
+    ):
         stop = min(start + step, total)
         rows = grids[start // stride : (stop + stride - 1) // stride]
         if rows.shape[0] == 0:
@@ -684,19 +730,29 @@ def run(request: BakeRequest) -> BakeOutcome:
         artifacts[key] = path
 
     audio_pages = Fraction(0)
+    rate_hz = (
+        request.audio_rate_hz
+        if request.audio_rate_hz is not None
+        else quality.audio_hz_for(request.duration / quality.SECONDS_PER_MINUTE)
+    )
     if request.audio:
-        samples = _decode_audio(
-            request.source, request.start, request.duration, request.audio_rate_hz
-        )
+        samples = _decode_audio(request.source, request.start, request.duration, rate_hz)
         if samples.size:
-            encoded = adpcmb.encode(samples, rate_hz=request.audio_rate_hz)
+            encoded = adpcmb.encode(samples, rate_hz=rate_hz)
             voice = adpcmb.build_rom(encoded, pad_to=max(V_ROM_MIN_BYTES, len(encoded.payload)))
             (baked / "v2.bin").write_bytes(voice)
             artifacts["voice"] = baked / "v2.bin"
             _write_audio_params(request.build_dir, encoded)
             audio_pages = audio_pages_per_frame(encoded.delta_n)
 
-    asm, header = _write_sources(request.build_dir, artifacts, result, request, audio_pages)
+    asm, header = _write_sources(
+        request.build_dir,
+        artifacts,
+        result,
+        request,
+        audio_pages=audio_pages,
+        audio_hz=rate_hz,
+    )
     artifacts["asm"] = asm
     artifacts["header"] = header
 

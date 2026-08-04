@@ -93,7 +93,7 @@ static void clear_vram(void)
  * movie has a single epoch and half of it when epochs alternate. It is
  * emitted rather than derived so the two cases cannot drift apart. */
 #define EPOCH_WORDS      (MOVIE_EPOCH_PALETTES * 16u)
-#define EPOCH_SLICE      48u
+#define EPOCH_SLICE      MOVIE_EPOCH_SLICE
 
 static uint16_t resident_epoch;
 static uint16_t loading_epoch;

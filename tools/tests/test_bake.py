@@ -804,7 +804,17 @@ class TestEpochsGiveTheLoaderTime:
 
         starts = outcome.result.epoch_starts
         for earlier, later in itertools.pairwise(starts):
-            assert later - earlier >= bake.MIN_EPOCH_FRAMES
+            assert later - earlier >= bake.epoch_upload_frames(8)
+
+    def test_the_minimum_follows_the_palette_count(self):
+        """Half the palettes are uploaded per epoch, so more colours take longer."""
+        assert bake.epoch_upload_frames(240) > bake.epoch_upload_frames(8)
+
+    def test_the_minimum_covers_the_upload_with_room_to_spare(self):
+        """One upload time would leave nothing for the transport to redraw in."""
+        bare = (240 // 2) * bake.WORDS_PER_PALETTE / bake.PALETTE_WORDS_PER_FRAME
+
+        assert bake.epoch_upload_frames(240) >= bare * bake.EPOCH_UPLOAD_MARGIN
 
     def test_a_cadence_below_the_minimum_collapses_to_one_epoch(self, synthetic_clip, tmp_path):
         outcome = bake.run(
