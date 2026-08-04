@@ -455,3 +455,33 @@ class TestPlanAgreesWithTheBake:
 
     def test_a_tier_the_baker_would_refuse_is_not_printed(self):
         assert "  q31 " not in self._plan(None)
+
+
+class TestTheCodeNeverTrims:
+    """Shortening the film is the owner's call, never the baker's.
+
+    Every path that could be tempted to make a source fit by cutting it
+    has to do something else instead: refuse and say how much would have
+    to go, or give up a different budget.
+    """
+
+    def test_a_source_that_fits_nowhere_is_refused_rather_than_shortened(self):
+        assert quality.select(600.0, 100_000.0) is None
+
+    def test_the_refusal_names_the_trim_for_the_owner_to_make(self):
+        message = quality.shortfall_message(600.0, 100_000.0)
+
+        assert message is not None
+        assert "trim" in message
+
+    def test_a_long_source_gives_up_sample_rate_and_keeps_its_runtime(self):
+        short = quality.audio_hz_for(5.0)
+        long = quality.audio_hz_for(60.0)
+
+        assert long < short
+
+    def test_the_advice_is_reported_and_never_applied(self):
+        fit = quality.survey(600.0, 100_000.0)[-1]
+
+        assert fit.trim_minutes > 0.0
+        assert fit.minutes == 600.0

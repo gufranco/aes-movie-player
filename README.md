@@ -7,7 +7,7 @@
 <br>
 
 [![Licence](https://img.shields.io/badge/licence-GPL--3.0-blue?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-676%20passing-brightgreen?style=flat-square)](tools/tests)
+[![Tests](https://img.shields.io/badge/tests-680%20passing-brightgreen?style=flat-square)](tools/tests)
 [![Hardware](https://img.shields.io/badge/runs%20on-real%20AES%20%2B%20MVS-success?style=flat-square)](#on-real-hardware)
 [![Target](https://img.shields.io/badge/target-Neo%20Geo%20AES-red?style=flat-square)](#hardware-ceilings)
 [![Verified](https://img.shields.io/badge/verified-geolith%20%2B%20MAME-blueviolet?style=flat-square)](#verification)
@@ -24,7 +24,7 @@
 
 <div align="center">
 
-**158 MB** cartridge · **35,274** frames · **59.2** fps · **846,784** tiles · **81%** of the C-ROM ceiling · **676** tests
+**158 MB** cartridge · **35,274** frames · **59.2** fps · **846,784** tiles · **81%** of the C-ROM ceiling · **680** tests
 
 <br>
 
@@ -1017,6 +1017,11 @@ Requests that outlive any single change.
   fixed; anything else is measured. The audit of which is which is under
   [The quality system](#the-quality-system), and the values the current bake
   derived are in the table above.
+- **The code never trims.** Shortening a film is the owner's decision and
+  not the baker's. A source that fits nowhere is refused with the exact
+  figure that would have to come out, and a source too long for the voice
+  ROM gives up sample rate rather than its tail. No path shortens a movie
+  to make it fit, and tests hold that.
 - **Extract the maximum quality the hardware allows,** losing only what a
   viewer cannot perceive. Every lever that was tried and failed is under
   [What did not work](#what-did-not-work), so it is not tried twice.
