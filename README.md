@@ -7,7 +7,7 @@
 <br>
 
 [![Licence](https://img.shields.io/badge/licence-GPL--3.0-blue?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-649%20passing-brightgreen?style=flat-square)](tools/tests)
+[![Tests](https://img.shields.io/badge/tests-676%20passing-brightgreen?style=flat-square)](tools/tests)
 [![Hardware](https://img.shields.io/badge/runs%20on-real%20AES%20%2B%20MVS-success?style=flat-square)](#on-real-hardware)
 [![Target](https://img.shields.io/badge/target-Neo%20Geo%20AES-red?style=flat-square)](#hardware-ceilings)
 [![Verified](https://img.shields.io/badge/verified-geolith%20%2B%20MAME-blueviolet?style=flat-square)](#verification)
@@ -24,7 +24,7 @@
 
 <div align="center">
 
-**158 MB** cartridge · **35,274** frames · **59.2** fps · **846,784** tiles · **81%** of the C-ROM ceiling · **649** tests
+**158 MB** cartridge · **35,274** frames · **59.2** fps · **846,784** tiles · **81%** of the C-ROM ceiling · **676** tests
 
 <br>
 
@@ -355,34 +355,43 @@ Source
   9:56 runtime, 1280x720, 24.00 fps, audio present
 
 Calibration
-  measured 95,270 tiles per minute at 'q17'
+  measured 91,881 tiles per minute at 'q17'
 
 Quality ladder for this source
   tier      picture                                  fps     holds               verdict
   ------------------------------------------------------------------------------------
-  q01       every frame, colour at 100%             59.2      5:31          over by 4:52
+  q01       every frame, colour at 100%             59.2      5:42          over by 4:42
   ...
-  q15       every frame, colour at 42%              59.2     10:01          over by 0:44
-  q16       every frame, colour at 39%              59.2     10:29          over by 0:17
-  q17       every frame, colour at 37%              59.2     11:00      fits, 0:12 spare
-  q18       every frame, colour at 34%              59.2     11:17      fits, 0:27 spare
+  q15       every frame, colour at 42%              59.2     10:23          over by 0:24
+  q16       every frame, colour at 39%              59.2     10:52      fits, 0:04 spare
+  q17       every frame, colour at 37%              59.2     11:25      fits, 0:34 spare
   ...
-  q30       every frame, colour at 8%               59.2     16:53      fits, 5:36 spare
-  q31       30 fps, colour at 8%                    29.6     18:17      fits, 6:54 spare
-  q35       10 fps, colour at 8%                     9.9     31:27     fits, 19:00 spare
+  q30       every frame, colour at 8%               59.2     17:23      fits, 6:03 spare
+  q32       20 fps, colour at 8%                    19.7     19:44      fits, 8:12 spare
+  q35       10 fps, colour at 8%                     9.9     29:39     fits, 17:22 spare
 
-Selected: q17
-  every frame, colour at 37%
-  chroma weight 0.37, frame hold 1, tolerance 0.002887, denoise 0.0
-  holds 11:00, uses 9:56, 0:12 spare
+Selected: q16
+  every frame, colour at 39%
+  chroma weight 0.39, frame hold 1, tolerance 0.002587, denoise 0.0
+  holds 10:52, uses 9:56, 0:04 spare
 
-To reach 'q16' instead (every frame, colour at 39%):
-  Trim 0:17, bringing the source to 9:39 or shorter.
+To reach 'q15' instead (every frame, colour at 42%):
+  Trim 0:24, bringing the source to 9:33 or shorter.
 
 Cartridge budget at this tier
-  C-ROM    115.5 MiB of 128.0 MiB     90%   946,352 tiles
+  C-ROM    114.8 MiB of 128.0 MiB     90%   940,789 tiles
   audio     15.8 MiB of 16.0 MiB     99%   at 55.6 kHz, grade 1 of 35
 ```
+
+`q31` is absent because this source runs at 24 fps. Holding each frame for
+two refreshes shows it at 29.6 fps, which still shows every frame the source
+had, so the rung saves no tiles and the baker refuses it. The planner leaves
+out rungs the baker would refuse rather than offering them and failing later.
+
+That last block is a projection and it runs high: the bake it describes spent
+846,784 tiles, 81% rather than 90%. Calibration samples short windows and each
+one starts with a cold dictionary, where almost every slot mints a tile, while
+a full bake amortises reuse across 35,274 frames.
 
 That last block is a projection, and it runs high. The bake it describes
 actually spent 846,784 tiles, 81% rather than 90%. Calibration samples short
@@ -430,6 +439,57 @@ here, since a tile is a palette index rather than a Y/Cb/Cr triple, so the
 equivalent lever is the distance metric every stage already shares. Weighting
 it once moves palette fitting, tile assignment, and redraw decisions onto a
 luma-first metric together.
+
+### The ladder is a frontier, and now it is checked
+
+The claim above, that no rung costs as much as another while looking no
+better, went untested for most of this project's life.
+[`sweep_ladder.py`](tools/scripts/sweep_ladder.py) bakes one window at every
+reachable rung and checks it. Each bake gets the whole tile budget for a short
+window so the rate controller never engages and every rung reports its natural
+cost rather than what a controller squeezed it into.
+
+On a 45 second window, 34 rungs measured: cost falls monotonically, error
+rises monotonically, and **no rung is dominated**. The claim holds.
+
+The same sweep found two defects that the declared costs had been hiding.
+
+**The frame-hold rungs were costed optimistically.** Calibration anchors the
+ladder onto the source's own cost curve, and all three anchors were chroma
+values at hold 1, so the hold rungs were extrapolated rather than measured.
+Every chroma rung came out conservative by 2% to 9%, which is the safe
+direction. Every hold rung came out optimistic:
+
+| Tier | Planner implied | Measured | Planner was |
+|---|---:|---:|---|
+| q30 | 0.652 | 0.618 | 5.1% conservative |
+| q32 | 0.521 | 0.568 | 9.0% optimistic |
+| q33 | 0.444 | 0.503 | 13.3% optimistic |
+| q34 | 0.395 | 0.480 | 21.6% optimistic |
+| q35 | 0.350 | 0.441 | 26.0% optimistic |
+
+Optimistic is the direction that hurts: the planner promises runtime the
+cartridge cannot hold, the dictionary reaches its cap, and the last minutes
+freeze. A fourth anchor now sits on a hold rung, so that range is measured
+rather than guessed. It is skipped on a source too slow for the hold to drop
+any frame, where it would measure nothing.
+
+**A rung was being offered that could never be baked.** For a 24 fps source
+`q31` holds each frame for two refreshes, which still shows every frame the
+source had, so it saves no tiles and the baker refuses it outright. The
+planner listed it as fitting anyway. `survey` and `select` now take the
+source's frame rate and leave out rungs the baker would refuse.
+
+Correcting both moved the choice for the reference film from `q17` to `q16`
+without trimming a second.
+
+**The exchange rate is not uniform, and that is what sets the step count.**
+Measured across the ladder, a step at the top saves about 4,100 tiles for
+0.00001 error, while a step at the bottom saves about 1,900 for 0.00026: a
+65x spread. Steps near `q01` are nearly free in quality, steps near `q30`
+are not. A ladder with uniform percentage steps would be too fine at the top,
+where nothing visible changes, and too coarse at the bottom, where each step
+costs the most.
 
 **Calibration accuracy comes from window count, not sample length.** A
 feature varies enormously in difficulty from scene to scene, so a handful of
@@ -943,11 +1003,11 @@ capture.
    blend fraction beside the nearest one already precomputed per palette and
    colour. Whether it beats the banding is a question for a person and a full
    bake, since the metric already proved it ranks smearing highest.
-2. **A tier above `q17`.** The ladder runs up to `q01` and the bake stops at
-   `q17` because that is the highest rung fitting 9:56 untrimmed. `q16`
-   needs about 17 seconds trimmed. Each step is a fresh bake and
-   the trim is an editorial decision, so it waits for a call rather than a
-   measurement.
+2. **Bake the tier the planner now picks.** Correcting the cost model moved
+   the choice for this film from `q17` to `q16` with no trim, so the
+   editorial question that was blocking this has gone away. The cartridge on
+   disk is still `q17`; reaching `q16` is a fresh bake and then a look at the
+   result, since the metric cannot say whether it is better.
 
 ### Standing rules for this project
 
@@ -1046,7 +1106,7 @@ full measurement is under [What did not work](#what-did-not-work).
 | [`src/`](src) | The 68000 player, the fix-layer menu, and the Z80 sound driver |
 | [`tools/aesmovie/`](tools/aesmovie) | The baker: decode, colour, palettes, dictionary, encoder, quality ladder, audio, ROM containers |
 | [`tools/tests/`](tools/tests) | Test suite, including the emulator transcriptions used as oracles |
-| [`tools/scripts/`](tools/scripts) | Capture, verification, and timing helpers |
+| [`tools/scripts/`](tools/scripts) | Capture, verification, timing and ladder-sweep helpers |
 | [`toolchain/`](toolchain) | The ngdevkit build, native or containerised |
 
 ## Licence
