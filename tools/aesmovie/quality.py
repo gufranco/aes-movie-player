@@ -347,8 +347,9 @@ def format_plan(
     trimming the source stays a decision the person makes with the
     numbers in front of them.
     """
-    fits = survey(minutes, reference_rate, anchors)
-    chosen = select(minutes, reference_rate)
+    scope = {"source_fps": float(source_fps), "vblank_fps": float(vblank_fps)}
+    fits = survey(minutes, reference_rate, anchors, **scope)
+    chosen = select(minutes, reference_rate, anchors, **scope)
     audio = "audio present" if has_audio else "no audio"
     lines = [
         "Source",
@@ -397,15 +398,49 @@ def format_plan(
     return "\n".join(lines)
 
 
+def reachable(tier: Tier, *, source_fps: float, vblank_fps: float) -> bool:
+    """Whether baking this tier would drop any of the source's own frames.
+
+    A hold counts display refreshes rather than source frames. A 24 fps
+    source reaching a 59.185 Hz raster already repeats each frame about
+    2.47 times, so holding two refreshes still shows every frame it had:
+    the tier costs temporal accuracy and saves not one tile. The baker
+    refuses such a hold, so offering it hands back a tier that cannot be
+    baked.
+    """
+    if tier.frame_hold <= 1:
+        return True
+    return vblank_fps / tier.frame_hold < source_fps
+
+
 def survey(
-    minutes: float, reference_rate: float, anchors: dict[float, float] | None = None
+    minutes: float,
+    reference_rate: float,
+    anchors: dict[float, float] | None = None,
+    *,
+    source_fps: float | None = None,
+    vblank_fps: float | None = None,
 ) -> list[Fit]:
-    """Every tier measured against one runtime, best quality first."""
-    return [Fit(tier, minutes, max_minutes(tier, reference_rate, anchors)) for tier in LADDER]
+    """Every tier measured against one runtime, best quality first.
+
+    Given the source's frame rate, tiers the baker would refuse are left
+    out rather than offered and then rejected.
+    """
+    ladder: tuple[Tier, ...] = LADDER
+    if source_fps is not None and vblank_fps is not None:
+        ladder = tuple(
+            tier for tier in LADDER if reachable(tier, source_fps=source_fps, vblank_fps=vblank_fps)
+        )
+    return [Fit(tier, minutes, max_minutes(tier, reference_rate, anchors)) for tier in ladder]
 
 
 def shortfall_message(
-    minutes: float, reference_rate: float, anchors: dict[float, float] | None = None
+    minutes: float,
+    reference_rate: float,
+    anchors: dict[float, float] | None = None,
+    *,
+    source_fps: float | None = None,
+    vblank_fps: float | None = None,
 ) -> str | None:
     """Why a source cannot be baked at all, or None when some tier fits.
 
@@ -413,9 +448,10 @@ def shortfall_message(
     reader is asked to act on, can be checked without a source long
     enough to actually overrun a cartridge.
     """
-    if select(minutes, reference_rate, anchors) is not None:
+    scope = {"source_fps": source_fps, "vblank_fps": vblank_fps}
+    if select(minutes, reference_rate, anchors, **scope) is not None:
         return None
-    cheapest = survey(minutes, reference_rate, anchors)[-1]
+    cheapest = survey(minutes, reference_rate, anchors, **scope)[-1]
     return (
         f"this source does not fit at any quality tier; trim "
         f"{clock(cheapest.trim_minutes)} and bake again"
@@ -423,16 +459,23 @@ def shortfall_message(
 
 
 def select(
-    minutes: float, reference_rate: float, anchors: dict[float, float] | None = None
+    minutes: float,
+    reference_rate: float,
+    anchors: dict[float, float] | None = None,
+    *,
+    source_fps: float | None = None,
+    vblank_fps: float | None = None,
 ) -> Fit | None:
     """The best tier that fits, or None when even the cheapest overruns."""
-    for fit in survey(minutes, reference_rate, anchors):
+    for fit in survey(
+        minutes, reference_rate, anchors, source_fps=source_fps, vblank_fps=vblank_fps
+    ):
         if fit.fits:
             return fit
     return None
 
 
-ANCHOR_CHROMA: Final = (1.0, 0.37, 0.08)
+ANCHOR_TIERS: Final = ("q01", "q17", "q30", "q32")
 """Where the source's own cost curve is measured.
 
 One anchor is not enough. Measured across four sources, the cost of a
@@ -441,7 +484,29 @@ and diverged by up to 2x at the extremes: at colour 8% the cheapest source
 came in at 0.378 and the dearest at 0.756. A ladder averaged over sources
 therefore mispredicts any single one, and it does so worst exactly where
 the rungs are cheapest. Three anchors pin both ends and the middle.
+
+The fourth sits on a frame-hold rung. Measured across the whole ladder on
+one source, the three chroma anchors left the hold rungs to extrapolation
+and the error ran the unsafe way: q32 through q35 cost 9%, 13%, 22% and
+26% more than predicted, so the planner promised runtime the cartridge
+could not hold. Every chroma rung was conservative by 2% to 9% over the
+same measurement. Anchoring inside the hold range replaces that
+extrapolation with a reading.
 """
+
+
+def anchor_tiers(source_fps: float, vblank_fps: float) -> tuple[Tier, ...]:
+    """The rungs worth measuring on this source.
+
+    A hold anchor is only meaningful when the hold actually drops source
+    frames. On a slow source it would measure the same cost as no hold at
+    all and pin the curve to a value that says nothing.
+    """
+    return tuple(
+        tier
+        for tier in (tier_by_name(name) for name in ANCHOR_TIERS)
+        if reachable(tier, source_fps=source_fps, vblank_fps=vblank_fps)
+    )
 
 
 def rescale(relative_cost: float, *, anchors: dict[float, float]) -> float:

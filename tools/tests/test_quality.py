@@ -139,11 +139,12 @@ class TestPlanReport:
             vblank_fps=59.1856,
         )
 
-    def test_it_names_every_tier(self):
+    def test_it_names_every_tier_the_source_can_use(self):
         text = self.plan(12.0)
 
         for tier in quality.LADDER:
-            assert tier.name in text
+            reachable = quality.reachable(tier, source_fps=24.0, vblank_fps=59.1856)
+            assert (tier.name in text) is reachable
 
     def test_it_states_the_selected_tier(self):
         text = self.plan(12.0)
@@ -362,3 +363,95 @@ class TestPerSourceCurve:
         corrected = [quality.rescale(rung, anchors=anchors) for rung in rungs]
 
         assert all(a > b for a, b in itertools.pairwise(corrected))
+
+
+class TestUnreachableHolds:
+    """A hold that shows every source frame anyway saves nothing.
+
+    The baker refuses such a hold outright, so a planner that still offers
+    it hands back a tier that cannot be baked.
+    """
+
+    VBLANK = 59.185
+
+    def test_a_hold_that_drops_no_source_frame_is_not_offered(self):
+        offered = [
+            fit.tier.name
+            for fit in quality.survey(30.0, 100_000.0, source_fps=24.0, vblank_fps=self.VBLANK)
+        ]
+
+        assert "q31" not in offered
+
+    def test_a_hold_that_does_drop_frames_stays_on_the_ladder(self):
+        offered = [
+            fit.tier.name
+            for fit in quality.survey(30.0, 100_000.0, source_fps=24.0, vblank_fps=self.VBLANK)
+        ]
+
+        assert "q32" in offered
+
+    def test_a_faster_source_keeps_the_shorter_hold(self):
+        offered = [
+            fit.tier.name
+            for fit in quality.survey(30.0, 100_000.0, source_fps=60.0, vblank_fps=self.VBLANK)
+        ]
+
+        assert "q31" in offered
+
+    def test_without_a_source_rate_every_tier_is_offered(self):
+        assert len(quality.survey(30.0, 100_000.0)) == len(quality.LADDER)
+
+    def test_selection_never_returns_a_tier_the_baker_would_refuse(self):
+        fit = quality.select(25.0, 100_000.0, source_fps=24.0, vblank_fps=self.VBLANK)
+
+        assert fit is None or fit.tier.name != "q31"
+
+
+class TestAnchorChoice:
+    VBLANK = 59.185
+
+    def test_the_reference_tier_is_always_anchored(self):
+        names = [t.name for t in quality.anchor_tiers(24.0, self.VBLANK)]
+
+        assert quality.REFERENCE_TIER in names
+
+    def test_a_frame_hold_rung_is_anchored_when_the_source_allows_it(self):
+        holds = [t.frame_hold for t in quality.anchor_tiers(24.0, self.VBLANK)]
+
+        assert max(holds) > 1
+
+    def test_a_slow_source_drops_the_hold_anchor(self):
+        holds = [t.frame_hold for t in quality.anchor_tiers(10.0, self.VBLANK)]
+
+        assert max(holds) == 1
+
+    def test_every_anchor_is_a_real_tier(self):
+        for tier in quality.anchor_tiers(24.0, self.VBLANK):
+            assert quality.tier_by_name(tier.name) is tier
+
+
+class TestPlanAgreesWithTheBake:
+    VBLANK = 59.185
+
+    def _plan(self, anchors):
+        return quality.format_plan(
+            source="film.mkv",
+            minutes=20.0,
+            width=1280,
+            height=720,
+            source_fps=24.0,
+            has_audio=True,
+            reference_rate=100_000.0,
+            vblank_fps=self.VBLANK,
+            anchors=anchors,
+        )
+
+    def test_the_printed_choice_is_the_one_the_anchors_imply(self):
+        anchors = {1.529: 1.9, 1.0: 1.0, 0.581: 0.5, 0.437: 0.4}
+        expected = quality.select(20.0, 100_000.0, anchors, source_fps=24.0, vblank_fps=self.VBLANK)
+
+        assert expected is not None
+        assert f"Selected: {expected.tier.name}" in self._plan(anchors)
+
+    def test_a_tier_the_baker_would_refuse_is_not_printed(self):
+        assert "  q31 " not in self._plan(None)
