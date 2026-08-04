@@ -85,7 +85,7 @@ Read from the source of two independent emulators rather than from prose.
 |---|---|---|
 | Character ROM | 20-bit tile number, 1,048,576 tiles, 128 MiB | The binding constraint at every quality tier |
 | Program ROM | 3-bit bank latch, 8 banks of 1 MiB | Command stream. Used 3.0 MB for ten minutes, never close |
-| ADPCM-B voice ROM | 16 MiB, one continuous sample | About 25 minutes at 22 kHz. Only binds past that |
+| ADPCM-B voice ROM | 16 MiB of 4-bit samples, reached through a 16-bit page counter | About 10 minutes at the chip's 55.6 kHz ceiling. Longer sources get the highest rate that still ends on an addressable page |
 | Sprites per scanline | 96 | The grid uses 20 |
 | Palettes | 256 banks of 16 colours, index 0 transparent | 240 for video, 16 reserved for the menu |
 | Watchdog | about 0.13 seconds | Bounds any initialisation loop |
