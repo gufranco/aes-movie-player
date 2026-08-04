@@ -8,6 +8,7 @@
 
 [![Licence](https://img.shields.io/badge/licence-GPL--3.0-blue?style=flat-square)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-627%20passing-brightgreen?style=flat-square)](tools/tests)
+[![Hardware](https://img.shields.io/badge/runs%20on-real%20AES%20%2B%20MVS-success?style=flat-square)](#on-real-hardware)
 [![Target](https://img.shields.io/badge/target-Neo%20Geo%20AES-red?style=flat-square)](#hardware-ceilings)
 [![Verified](https://img.shields.io/badge/verified-geolith%20%2B%20MAME-blueviolet?style=flat-square)](#verification)
 
@@ -29,7 +30,7 @@
 
 <img src="docs/screenshot.png" alt="Big Buck Bunny running from the cartridge at 320x224, captured from MAME" width="640">
 
-<sub>Captured from MAME running the built cartridge, upscaled 2x with nearest neighbour. The black left column is MAME's own, and is <a href="#verification">measured and explained below</a>.</sub>
+<sub>Captured from MAME running the built cartridge, upscaled 2x with nearest neighbour. The black left column is MAME's own, and is <a href="#verification">measured and explained below</a>. The same cartridge has <a href="#on-real-hardware">played through on a real AES and MVS</a>.</sub>
 
 </div>
 
@@ -434,6 +435,34 @@ crop had been hiding. Excluding it, the residual is a smooth per-level
 difference, the signature of a different digital-to-analog model rather than
 a structural disagreement. Both are emulator-side.
 
+### On real hardware
+
+The cartridge has run on a real AES and on a real MVS, loaded from a NeoSD
+flash cart. Both played the full ten minutes with no defect seen: the picture
+filled the raster and stayed correct, the soundtrack played and held sync
+across the whole run, and the transport responded.
+
+That is the evidence the rest of this document could not supply. Everything
+above is a reading of documentation or of an emulator, and two emulators
+agreeing is weaker than it looks because both can share a tolerance the board
+does not have. A board has now been the judge.
+
+| Claim | What the run settles |
+|---|---|
+| Tile encoding, C-ROM packing, palette upload | The picture is correct on silicon, not only in a model of it |
+| VRAM writes past the blanking interval | Permitted in practice, as the wiki says and as `OVERRUN` counts |
+| ADPCM-B rate and the frame-to-page mapping | Audio holds sync across ten minutes without drifting audibly |
+| 3-bit bank latch, 5 P-ROM banks, 120 palette epochs | The stream survives every bank crossing to the end of the film |
+| Keyframe seek index and the audio re-point | Seek, rewind and fast forward behave as designed |
+
+Two limits on how far to read it. The run exercises the build carrying both
+of this session's timing fixes, so it says the current code is correct on a
+board; it does not prove the earlier tighter spacing would have failed.
+And a clean run is not a cycle measurement, so the write-spacing minimums
+stay sourced from documentation and enforced by
+[the build gate](#hardware-notes-worth-knowing) rather than confirmed by
+observation.
+
 ## What did not work
 
 Negative results, kept because they cost real time to find.
@@ -696,6 +725,14 @@ default, so a capture shows 304 of the 320 active columns unless zeroed.
 
 A single place to answer "where is this" without reading the history.
 
+### It plays on a board
+
+The build carrying both of this session's timing fixes has run from a NeoSD
+flash cart on a real AES and a real MVS, full length, with no defect seen.
+That closes the question the project could not answer for its whole life, and
+it is written up with its limits under
+[On real hardware](#on-real-hardware).
+
 ### The cartridge on disk
 
 Baked from `assets/clip/big_buck_bunny_720p_h264.mov`, full length, with
@@ -744,7 +781,9 @@ the frame-to-page mapping, and up to 4.6 ms rounding on each seek.
 The cartridge on disk was rebuilt after the seek-bar fix. Only the overlay
 changed: `main.o` disassembles identically to the build the emulator
 comparison above was run against, so the video path is the same bytes and
-that comparison still stands. The overlay itself has not been re-captured.
+that comparison still stands. The overlay has since been exercised on both
+emulators and on the two boards, drawing the transport panel, the seek bar
+and the diagnostics page without a defect.
 
 <details>
 <summary><strong><code>measure_drift.py</code> now refuses the answers it used to invent</strong></summary>
@@ -793,9 +832,6 @@ capture.
    needs about 24 seconds trimmed. Each step is a fresh 40 minute bake and
    the trim is an editorial decision, so it waits for a call rather than a
    measurement.
-3. **Real hardware.** Nothing here has run on an AES. Until it does, every
-   hardware claim has to come from documentation or emulator source, never
-   from two emulators agreeing.
 
 ### Standing rules for this project
 
@@ -839,10 +875,17 @@ cannot nudge a pixel. It can only point a slot at a tile that already exists.
 <summary><strong>Has this run on a real AES?</strong></summary>
 <br>
 
-No. Every hardware claim comes from documentation or from emulator source,
+Yes, and on a real MVS, from a NeoSD flash cart. Both played the full ten
+minutes with the picture correct, the sound in sync and the transport
+working, with no defect seen. The details and the limits of what that
+settles are under [On real hardware](#on-real-hardware).
+
+The care taken before that run still stands behind the rest of the document:
+every hardware claim here comes from documentation or from emulator source,
 never from two emulators agreeing, because both can share a tolerance the
-hardware does not have. The instruction-level timing check exists precisely
-because it covers the one defect class an emulator cannot show.
+board does not have. The instruction-level timing check exists for the same
+reason, and a clean playthrough is not a substitute for it since it measures
+no cycles.
 
 </details>
 
