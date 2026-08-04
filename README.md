@@ -398,6 +398,103 @@ port, where one write per word is already the floor.
 The fix layer has 32 rows but the raster only shows rows 2 to 29, so an
 overlay anchored to row 27 floats two rows above the bottom edge.
 
+### Checked against documentation rather than against an emulator
+
+Two emulators agreeing is weaker evidence than it looks: both can share a
+tolerance the hardware does not have. These points come from the NeoGeo
+Development Wiki's VRAM page.
+
+| Claim | Status |
+|---|---|
+| Address port `$3C0000`, data `$3C0002`, modulo `$3C0004`, signed auto-increment after write | Confirmed |
+| Writing VRAM during active display | **Permitted.** "VRAM can be modified even during active display", so frames that overrun vblank are not a hardware fault |
+| At least 12 CPU cycles between consecutive data writes, >24 mclk | Documented, **not yet verified in our output** |
+| At least 16 CPU cycles after a write before setting a new address | Documented, **not yet verified in our output** |
+| Bit 15 of `$3C0006` low means vblank | **Unverified.** Rests on the code working under two emulators, not on a source read |
+
+The cycle spacing is the live risk. `apply_frame` writes back to back:
+
+```c
+while (tiles--) {
+    REG_VRAMRW = *cursor++;
+    REG_VRAMRW = *cursor++;
+}
+```
+
+On a 68000 `move.w (An)+,(An)` costs 12 cycles, exactly the documented
+minimum with no margin, while `move.w (An)+,(xxx).L` costs 20 and is safe.
+Which one the compiler emits decides whether the loop is correct on a board,
+and the wiki notes that going too fast is what makes overclocked systems
+glitch. Disassembling `apply_frame` settles it; that has not been done.
+
+## State of the work
+
+A single place to answer "where is this" without reading the history.
+
+### The cartridge on disk
+
+Baked from `assets/clip/big_buck_bunny_720p_h264.mov`, full length, with
+every parameter measured from the source rather than fixed.
+
+| Quantity | Value |
+|---|---|
+| Tier | `Q17`, colour at 37% |
+| Frames | 35,274, 59.2 fps, no holds |
+| C-ROM | 846,784 tiles, 81% of 128 MiB |
+| Palette epochs | 120, cadence from 6.0 measured cuts per minute |
+| Scene cut floor | 0.01175, the source's own 99th percentile |
+| Palette sampling | every 7 frames, derived from the epoch |
+| Audio | 55,555 Hz, the chip's ceiling |
+| Displayed error | 0.001006 |
+
+### Audio and video are locked
+
+Read off the player's own diagnostics page, which is the only measurement
+here that proved trustworthy.
+
+| Build | Vblank | Player frame | Behind |
+|---|---|---|---|
+| Shipped | 1,800 | 1,792 | 8 |
+| Shipped | 12,000 | 11,991 | 9 |
+| Diagnostics | 35,000 | 34,983 | 17 |
+
+The offset is flat across the whole movie, so it is the cost of booting
+before the movie starts rather than drift. The diagnostics build reads 17
+because it draws an extra row of text every frame. Audio starts immediately
+after frame 0 is applied and the YM2610 then streams on its own from the
+same crystal as the raster, so there is no mechanism left to separate them.
+`OVERRUN` reaches 20% of frames, which costs no frames and, per the section
+above, is permitted by the hardware.
+
+Residual error: 3 ms from the ADPCM rate grid across ten minutes, 3 ms from
+the frame-to-page mapping, and up to 4.6 ms rounding on each seek.
+
+### Do not trust `measure_drift.py` at depth
+
+It matches correctly up to about 12,000 frames and then returns confident
+wrong answers. It reported the player 662 frames behind once and 720 behind
+another time; the counters showed 8 and 17. One real bug in it was fixed, a
+run of pixel-identical frames on a static shot resolving to the earliest
+rather than the nearest, but that was not the cause and the cause is still
+unknown. Verify deep frames by reading the on-screen counters instead: build
+with `debug_visible = 1` and capture.
+
+### What is left
+
+1. **Disassemble `apply_frame`** and confirm the VRAM write spacing meets the
+   12 and 16 cycle minimums. Highest value, because it is the one defect
+   class the emulators cannot show.
+2. **Verify the vblank bit** against a documented source.
+3. **Fix or delete `measure_drift.py`.** A measurement that lies is worse
+   than none.
+4. **Gradient blocking.** Visible on flat areas such as the closing card.
+   The untried levers are dithering at palette assignment and a
+   smoothness-aware tolerance that spends more where the picture is flat.
+5. **Lowercase subtitle glyphs.** The pipeline works end to end and is
+   verified on screen; the font is uppercase plus comma, apostrophe,
+   question and exclamation.
+6. **Real hardware.** Nothing here has run on an AES.
+
 ## Repository layout
 
 | Path | Contents |
