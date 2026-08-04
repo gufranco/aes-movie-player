@@ -105,7 +105,9 @@ static void draw_seek_bar(uint32_t frame, uint32_t total)
     for (col = 0; col < MENU_BAR_CELLS; col++) {
         uint16_t tile;
 
-        if (col < filled) {
+        if (col == filled) {
+            tile = FIX_TILE_BAR_KNOB;
+        } else if (col < filled) {
             tile = FIX_TILE_BAR_FILLED;
         } else if (col == 0u) {
             tile = FIX_TILE_BAR_CAP_LEFT;
@@ -116,7 +118,6 @@ static void draw_seek_bar(uint32_t frame, uint32_t total)
         }
         fix_poke((uint16_t)(MENU_BAR_COL + col), MENU_BAR_ROW, tile);
     }
-    fix_poke((uint16_t)(MENU_BAR_COL + filled), MENU_BAR_ROW, FIX_TILE_BAR_KNOB);
 }
 
 void menu_draw(transport_state state, uint16_t speed, uint32_t frame, uint32_t total)
