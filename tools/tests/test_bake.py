@@ -817,3 +817,36 @@ class TestEpochsGiveTheLoaderTime:
         )
 
         assert len(outcome.result.epoch_starts) == 1
+
+
+class TestTheOverlayNamesTheRungActuallyUsed:
+    """`auto` is a request, not an answer, and the cart must record the answer."""
+
+    def test_a_resolved_rung_replaces_the_word_auto(self):
+        request = bake.BakeRequest(
+            source=Path("clip.mp4"), start=0.0, duration=1.0, build_dir=Path("build"), quality="q11"
+        )
+
+        assert bake.self_tier_name(request) == "Q11"
+
+    def test_a_bake_with_no_tier_is_named_custom(self):
+        request = bake.BakeRequest(
+            source=Path("clip.mp4"), start=0.0, duration=1.0, build_dir=Path("build"), quality=None
+        )
+
+        assert bake.self_tier_name(request) == "CUSTOM"
+
+    def test_the_word_auto_never_reaches_the_header(self, monkeypatch):
+        chosen = quality.tier_by_name("q07")
+        monkeypatch.setattr(bake, "_resolve_quality", lambda *_args: chosen)
+        captured: dict[str, object] = {}
+
+        def capture(request):
+            captured["quality"] = request.quality
+            raise SystemExit(0)
+
+        monkeypatch.setattr(bake, "run", capture)
+        with pytest.raises(SystemExit):
+            bake.main(["--source", "clip.mp4", "--duration", "1", "--quality", "auto"])
+
+        assert captured["quality"] == "q07"
