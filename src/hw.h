@@ -92,7 +92,22 @@ static inline uint16_t scb4_word(uint16_t left)
     return (uint16_t)((left & 0x1FF) << 7);
 }
 
-static inline int in_vblank(void) { return (REG_LSPCMODE & 0x8000) == 0; }
+#define LSPC_LINE_SHIFT      7
+#define LSPC_LINE_MASK       0x01FFu
+#define LSPC_LINE_FIRST_DRAWN 0x0100u
+#define LSPC_LINE_LAST_DRAWN  0x01EFu
+
+static inline uint16_t raster_line(void)
+{
+    return (uint16_t)((REG_LSPCMODE >> LSPC_LINE_SHIFT) & LSPC_LINE_MASK);
+}
+
+static inline int in_vblank(void)
+{
+    uint16_t line = raster_line();
+
+    return line < LSPC_LINE_FIRST_DRAWN || line > LSPC_LINE_LAST_DRAWN;
+}
 
 static inline void wait_vblank(void)
 {
