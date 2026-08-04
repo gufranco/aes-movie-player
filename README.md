@@ -427,6 +427,78 @@ Which one the compiler emits decides whether the loop is correct on a board,
 and the wiki notes that going too fast is what makes overclocked systems
 glitch. Disassembling `apply_frame` settles it; that has not been done.
 
+### Encodings read from the decoders, not guessed
+
+Every bit layout below was read out of an emulator's source rather than from
+a prose summary. Where geolith and MAME agree, they are two implementations
+sharing no code, which is the strongest evidence available without a board.
+
+Sources: [geolith-libretro](https://github.com/libretro/geolith-libretro)
+`src/geo_lspc.c`, and [mamedev/mame](https://github.com/mamedev/mame)
+`src/mame/snk/neogeo_spr.cpp`, `neogeo.cpp`, `src/devices/bus/neogeo/slot.cpp`.
+
+| Encoding | Value |
+|---|---|
+| SCB1 tile number | `even_word \| ((odd_word & 0x00F0) << 12)`, 20 bits |
+| SCB1 palette | odd bits 15 to 8 |
+| SCB1 hflip / vflip | odd bit 0 / odd bit 1 |
+| SCB1 auto-animation | odd bits 3 to 2 |
+| SCB3 | bit 6 sticky, bits 15 to 7 are `512 - top`, bits 5 to 0 height in tiles |
+| Sprite loop | `for i = 1; i < 382`, so sprite 0 never draws |
+| Tile bytes | 128 bytes, byte-interleaved c1 and c2, columns 8 to 15 first, four bytes per row, bit `n` is column `n`, leftmost pixel is the least significant bit |
+| Colour word | `\|D0\|R1\|G1\|B1\|R5R4R3R2\|G5G4G3G2\|B5B4B3B2\|`, five bits per channel plus a shared sixth, so 15-bit colour |
+| ADPCM-B rate | `f = 55555 * DeltaN / 65535`, 1.85 kHz to 55.5 kHz |
+| ADPCM-B ROM | 16 MiB, one continuous loopable sample |
+| MAME voice dataarea | `ymsnd:adpcmb` |
+| Watchdog | about 0.13 s, roughly 7.7 frames |
+
+Two digital-to-analog models exist in geolith. `geo_lspc_palgen_raw` scales
+the six-bit level linearly; `geo_lspc_palgen_resnet` models the board's
+resistor ladder of 3900, 2200, 1000, 470 and 220 ohms per channel and
+reaches true black where the raw model bottoms out at 4. The resistor model
+is the hardware-accurate one, so the baker targets it.
+
+The libretro front end crops by `geolith_overscan_*`, eight pixels a side by
+default, so a capture shows 304 of the 320 active columns unless zeroed.
+
+### Where the emulators disagree, and who wins
+
+- **Program-ROM banking.** MAME masks the bank register with `0x07`, giving
+  8 banks of 1 MiB, which matches the three-bit latch on the board. geolith
+  derives its mask from the ROM size and allows up to 8 bits. A stream
+  needing more than 8 banks works in geolith and reads the wrong bank on
+  hardware, so the baker enforces MAME's limit.
+- **C-ROM banking does not exist.** Neither emulator implements it on any
+  board, including every bootleg mapper MAME carries, and it cannot exist:
+  2^20 tiles at 128 bytes is exactly the 128 MiB the 20-bit tile number
+  addresses. 128 MiB is an absolute ceiling, not a per-bank window.
+
+One consequence shapes the whole encoder: there is no framebuffer, so there
+are no additive residuals. A correction cannot nudge a pixel, it can only
+point a slot at a tile that already exists in the dictionary. Every codec
+technique that assumes a residual path, motion masking among them, fails
+here for that reason.
+
+### Prior art the design draws on
+
+- **Resident Evil 2 on the Nintendo 64.** Angel Studios fit a two-CD, 1.2 GB
+  game into 64 MiB with 15 minutes of video in a 24 MiB budget, a 165:1
+  ratio, decoded in software with no video hardware. Chroma subsampling is
+  the technique this project inherits, as the chroma weight on the shared
+  Oklab metric.
+  [Modern Vintage Gamer](https://www.youtube.com/watch?v=BaX5YUZ5FLk),
+  [Hackaday](https://hackaday.com/2026/02/03/how-resident-evil-2-for-the-n64-kept-its-fmv-cutscenes/),
+  [Angel Studios postmortem](https://www.gamedeveloper.com/programming/postmortem-angel-studios-i-resident-evil-2-i-n64-version-)
+- **RoQ**, used by The 11th Hour and Quake III: a motion-compensating vector
+  quantizer with per-frame codebooks capped at 256 entries, so a bounded
+  number of new fragments enter per frame. This is the shape of the baker's
+  tile dictionary with a per-frame cap.
+  [MultimediaWiki](https://wiki.multimedia.cx/index.php/RoQ)
+- **Bad Apple on the Neo Geo** by HPMAN: 320x224, 13,167 frames, about four
+  minutes in roughly 3 MB. One bit and one palette, so tile dedup is
+  best-case, but it proves tile-streamed video with synced audio on real
+  hardware. [yAronet](https://www.yaronet.com/topics/188010-bad-apple-demo-datlibdatimageneosoundbuilder)
+
 ## State of the work
 
 A single place to answer "where is this" without reading the history.
@@ -488,8 +560,12 @@ with `debug_visible = 1` and capture.
 3. **Fix or delete `measure_drift.py`.** A measurement that lies is worse
    than none.
 4. **Gradient blocking.** Visible on flat areas such as the closing card.
-   The untried levers are dithering at palette assignment and a
-   smoothness-aware tolerance that spends more where the picture is flat.
+   Dithering the source before quantisation was tried and does nothing,
+   because the banding comes from the fifteen colours a tile may use rather
+   than from the colour word. Dithering where pixels are matched to a
+   palette is the untried version, alongside a smoothness-aware tolerance
+   that spends more budget where the picture is flat, since that is where
+   blocks show.
 5. **Lowercase subtitle glyphs.** The pipeline works end to end and is
    verified on screen; the font is uppercase plus comma, apostrophe,
    question and exclamation.
