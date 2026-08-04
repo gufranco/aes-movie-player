@@ -148,12 +148,12 @@ flowchart LR
 
 **A frame that changes nothing costs two bytes.** A 24 fps source shown on a
 59.185 Hz raster repeats each frame about 2.47 times, and every repeat is
-free. Over ten minutes the stream averages 16.7 slot updates per frame out
+free. Over ten minutes the stream averages 24.6 slot updates per frame out
 of 280.
 
 **Keyframes rewrite all 280 slots** and act as seek targets. The transport
 can jump anywhere by finding the nearest keyframe in an index and replaying
-from there. A ten minute movie carries 716 of them.
+from there. A ten minute movie carries 913 of them.
 
 **There are no residuals.** Picture quality is therefore dictionary richness,
 and dictionary richness is character ROM. That single fact shapes every
@@ -351,48 +351,68 @@ uv --project tools run python -m aesmovie.plan --source film.mkv
 
 ```
 Source
-  film.mkv
+  assets/clip/big_buck_bunny_720p_h264.mov
   9:56 runtime, 1280x720, 24.00 fps, audio present
 
 Calibration
-  measured 102,271 tiles per minute at 'q09'
+  measured 95,270 tiles per minute at 'q17'
 
 Quality ladder for this source
   tier      picture                                  fps     holds               verdict
   ------------------------------------------------------------------------------------
-  q01       every frame, colour at 100%             59.2      7:28          over by 3:05
+  q01       every frame, colour at 100%             59.2      5:31          over by 4:52
   ...
-  q15       every frame, colour at 42%              59.2     10:46          over by 0:03
-  q16       every frame, colour at 39%              59.2     11:05      fits, 0:15 spare
-  q17       every frame, colour at 37%              59.2     11:25      fits, 0:34 spare
+  q15       every frame, colour at 42%              59.2     10:01          over by 0:44
+  q16       every frame, colour at 39%              59.2     10:29          over by 0:17
+  q17       every frame, colour at 37%              59.2     11:00      fits, 0:12 spare
+  q18       every frame, colour at 34%              59.2     11:17      fits, 0:27 spare
   ...
-  q30       every frame, colour at 8%               59.2     19:39      fits, 8:08 spare
-  q31       30 fps, colour at 8%                    29.6     21:44     fits, 10:03 spare
-  q35       10 fps, colour at 8%                     9.9     43:14     fits, 29:50 spare
+  q30       every frame, colour at 8%               59.2     16:53      fits, 5:36 spare
+  q31       30 fps, colour at 8%                    29.6     18:17      fits, 6:54 spare
+  q35       10 fps, colour at 8%                     9.9     31:27     fits, 19:00 spare
 
 Selected: q17
   every frame, colour at 37%
-  chroma weight 0.37, frame hold 1, tolerance 0.0026, denoise 0.0
-  holds 11:25, uses 9:56, 0:34 spare
+  chroma weight 0.37, frame hold 1, tolerance 0.002887, denoise 0.0
+  holds 11:00, uses 9:56, 0:12 spare
 
 To reach 'q16' instead (every frame, colour at 39%):
-  Trim 0:24, bringing the source to 9:33 or shorter.
+  Trim 0:17, bringing the source to 9:39 or shorter.
 
 Cartridge budget at this tier
-  C-ROM    114.8 MiB of 128.0 MiB     90%   940,789 tiles
+  C-ROM    115.5 MiB of 128.0 MiB     90%   946,352 tiles
   audio     15.8 MiB of 16.0 MiB     99%   at 55.6 kHz, grade 1 of 35
 ```
+
+That last block is a projection, and it runs high. The bake it describes
+actually spent 846,784 tiles, 81% rather than 90%. Calibration samples short
+windows and each one starts with a cold dictionary, where almost every slot
+mints a tile, while a full bake amortises reuse across 35,274 frames. The
+estimate is therefore conservative by construction, and the margin it leaves
+is real capacity rather than error.
 
 Every tier is listed whether it fits or not, with the exact overshoot, so
 trimming the source stays a decision made with the numbers in view.
 Calibration takes under a minute where a bake takes hours.
 
-The thirty-five rungs are not an arbitrary subdivision. Each one was measured,
-and the ladder keeps only the settings that were not beaten on both axes at
-once. That is why colour falls in uneven steps and why frame rate only starts
-dropping at `q31`, once cheapening colour further has stopped buying
-anything. An earlier hand-picked ladder had a rung that was strictly worse
-than the one below it, which is the failure this ordering removes.
+The thirty-five rungs are not an arbitrary subdivision. Colour falls
+geometrically, about 6% off the previous rung each time, so every step is the
+same proportional change rather than the same absolute one. That is the right
+shape for a perceptual knob: five points off 100% is invisible, while five
+points off 10% is half the colour weight. The printed percentages look uneven
+only because they are rounded to whole numbers. Tolerance rises geometrically
+alongside, and cost falls close to linearly, roughly 3% of the reference rung
+per step.
+
+Frame rate only starts dropping at `q31`, once colour has bottomed out at 8%
+and cheapening it further has stopped buying anything. An earlier hand-picked
+ladder had a rung that was strictly worse than the one below it, which is the
+failure this ordering removes.
+
+Thirty-five is a deliberate count rather than padding. The planner takes the
+highest rung that fits and therefore always rounds down, so the gap between
+neighbours is capacity thrown away. At roughly 3% of the C-ROM per step that
+waste is about 31,000 tiles; halving the number of rungs would double it.
 
 The levers, in order of how much they cost perceptually:
 
@@ -588,7 +608,7 @@ budget, so width stays at 320.
 essentially do not occur in photographed or rendered material.
 
 **Compressing the command stream, and auto-animation.** Both save stream
-bytes. The stream used 3.0 MB of 8 MiB, so stream bytes are not scarce.
+bytes. The stream used 4.5 MB of 8 MiB, so stream bytes are not scarce.
 
 **Palette-only fades.** Across a whole movie, 35.7% of frames change at all
 and only 4.6% of those are explained by a single global brightness scale.
@@ -843,7 +863,7 @@ full length, with every parameter measured from the source rather than fixed.
 | Scene cut floor | 0.01175, the source's own 99th percentile |
 | Palette sampling | every 7 frames, derived from the epoch |
 | Audio | 55,555 Hz, the chip's ceiling |
-| Displayed error | 0.001006 |
+| Displayed error | 0.0010116 |
 
 The overlay font covers upper and lower case, digits and punctuation: 83
 glyphs drawn as text art, 2,656 bytes of the 128 KiB S-ROM. Lowercase was
@@ -925,7 +945,7 @@ capture.
    bake, since the metric already proved it ranks smearing highest.
 2. **A tier above `q17`.** The ladder runs up to `q01` and the bake stops at
    `q17` because that is the highest rung fitting 9:56 untrimmed. `q16`
-   needs about 24 seconds trimmed. Each step is a fresh 40 minute bake and
+   needs about 17 seconds trimmed. Each step is a fresh bake and
    the trim is an editorial decision, so it waits for a call rather than a
    measurement.
 
