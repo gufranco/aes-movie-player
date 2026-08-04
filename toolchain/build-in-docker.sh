@@ -81,6 +81,9 @@ for unit in main menu; do
     retry_build m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "src/$unit.c" -o "$BUILD/$unit.o"
 done
 
+echo "CHECK VRAM write spacing"
+python3 tools/scripts/check_vram_timing.py "$BUILD/main.o" "$BUILD/menu.o"
+
 echo "AS $GENERATED/movie_data.S"
 retry_build m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "$GENERATED/movie_data.S" -o "$BUILD/movie_data.o"
 
