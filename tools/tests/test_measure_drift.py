@@ -167,3 +167,58 @@ class TestTiedMatches:
         found = measure_drift.measure(baked, Path("shot.png"), 5, window=5, overscan=8)
 
         assert found == 2
+
+
+class TestAmbiguousMatches:
+    def test_a_distant_frame_matching_just_as_well_refuses_to_answer(
+        self, measure_drift, monkeypatch, baked, flat_reconstruction, capsys
+    ):
+        flat_reconstruction[1] = 120
+        flat_reconstruction[4] = 120
+        _capture(measure_drift, monkeypatch, 120)
+
+        found = measure_drift.measure(baked, Path("shot.png"), 5, window=5, overscan=8)
+
+        assert found is None
+        assert "ambiguous" in capsys.readouterr().out
+
+    def test_a_decisive_match_still_answers(
+        self, measure_drift, monkeypatch, baked, flat_reconstruction
+    ):
+        flat_reconstruction[1] = 30
+        flat_reconstruction[4] = 120
+        _capture(measure_drift, monkeypatch, 120)
+
+        found = measure_drift.measure(baked, Path("shot.png"), 5, window=5, overscan=8)
+
+        assert found == 4
+
+    def test_a_run_of_identical_frames_is_one_match_rather_than_rivals(
+        self, measure_drift, monkeypatch, baked, flat_reconstruction
+    ):
+        for step in (3, 4, 5):
+            flat_reconstruction[step] = 120
+        flat_reconstruction[0] = 20
+        _capture(measure_drift, monkeypatch, 120)
+
+        found = measure_drift.measure(baked, Path("shot.png"), 5, window=5, overscan=8)
+
+        assert found == 5
+
+    def test_the_separation_it_demands_is_configurable(
+        self, measure_drift, monkeypatch, baked, flat_reconstruction
+    ):
+        flat_reconstruction[1] = 118
+        flat_reconstruction[4] = 120
+        _capture(measure_drift, monkeypatch, 120)
+
+        assert (
+            measure_drift.measure(baked, Path("shot.png"), 5, window=5, overscan=8, separation=1.1)
+            == 4
+        )
+        assert (
+            measure_drift.measure(
+                baked, Path("shot.png"), 5, window=5, overscan=8, separation=100.0
+            )
+            is None
+        )
