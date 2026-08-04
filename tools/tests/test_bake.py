@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import itertools
 import importlib.util
+import itertools
 import json
 import subprocess
 from pathlib import Path
@@ -33,6 +33,30 @@ def synthetic_clip(tmp_path_factory):
             "lavfi",
             "-i",
             "testsrc=size=640x360:rate=24:duration=1",
+            "-pix_fmt",
+            "yuv420p",
+            str(path),
+        ],
+        check=True,
+    )
+    return path
+
+
+@pytest.fixture(scope="session")
+def epoch_clip(tmp_path_factory):
+    """An epoch cannot be shorter than the palette upload it covers, so a
+    clip meant to hold several of them has to be several seconds long."""
+    path = tmp_path_factory.mktemp("epochs") / "source.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=1280x720:rate=24:duration=8",
             "-pix_fmt",
             "yuv420p",
             str(path),
@@ -644,15 +668,15 @@ class TestPaletteEpochFlag:
 
         assert args.palette_epoch_seconds == 0.0
 
-    def test_a_long_clip_is_split_into_several_epochs(self, synthetic_clip, tmp_path):
+    def test_a_long_clip_is_split_into_several_epochs(self, epoch_clip, tmp_path):
         outcome = bake.run(
             bake.BakeRequest(
-                source=synthetic_clip,
+                source=epoch_clip,
                 start=0.0,
-                duration=1.0,
+                duration=8.0,
                 build_dir=tmp_path / "many",
                 palette_count=8,
-                palette_epoch_seconds=0.25,
+                palette_epoch_seconds=3.0,
             )
         )
 
@@ -701,11 +725,11 @@ class TestSceneAlignedEpochs:
                 "-f",
                 "lavfi",
                 "-i",
-                "color=c=red:size=320x224:rate=24:duration=1",
+                "color=c=red:size=320x224:rate=24:duration=3",
                 "-f",
                 "lavfi",
                 "-i",
-                "color=c=blue:size=320x224:rate=24:duration=1",
+                "color=c=blue:size=320x224:rate=24:duration=3",
                 "-filter_complex",
                 "[0:v][1:v]concat=n=2:v=1:a=0",
                 "-pix_fmt",
@@ -723,29 +747,32 @@ class TestSceneAlignedEpochs:
             bake.BakeRequest(
                 source=clip,
                 start=0.0,
-                duration=2.0,
+                duration=6.0,
                 build_dir=tmp_path / "aligned",
                 palette_count=8,
-                palette_epoch_seconds=4.0,
+                palette_epoch_seconds=5.0,
             )
         )
 
-        cut = round(1.0 * float(frames_mod.VBLANK_FPS))
+        cut = round(3.0 * float(frames_mod.VBLANK_FPS))
         starts = outcome.result.epoch_starts
 
         # Cuts are found in the strided palette sample, so a boundary
         # lands within one stride of the true cut rather than on it.
         assert any(abs(start - cut) <= outcome.request.sample_stride for start in starts)
 
-    def test_a_cadence_still_subdivides_a_long_scene(self, synthetic_clip, tmp_path):
+    def test_a_cadence_still_subdivides_a_long_scene(self, tmp_path):
+        """Subdivision survives, but only above the loader's minimum."""
+        clip = self.cut_clip(tmp_path)
+
         outcome = bake.run(
             bake.BakeRequest(
-                source=synthetic_clip,
+                source=clip,
                 start=0.0,
-                duration=1.0,
+                duration=6.0,
                 build_dir=tmp_path / "subdivided",
                 palette_count=8,
-                palette_epoch_seconds=0.25,
+                palette_epoch_seconds=2.5,
             )
         )
 
