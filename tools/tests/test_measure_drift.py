@@ -134,3 +134,36 @@ class TestExitCode:
         monkeypatch.setattr(measure_drift, "measure", lambda *_args, **_kwargs: 4)
 
         assert measure_drift.main(["--capture", "shot.png", "--expected", "10"]) == 0
+
+
+class TestTiedMatches:
+    """Consecutive frames are often pixel-identical on a static shot.
+
+    Keeping the first of those reports the player as hundreds of frames
+    behind when it is on time, because the tie runs backwards from the true
+    position. Among equally good matches the one nearest where the player
+    should be is the honest answer.
+    """
+
+    def test_a_tie_resolves_to_the_frame_nearest_the_expected_one(
+        self, measure_drift, monkeypatch, baked, flat_reconstruction
+    ):
+        for step in (1, 2, 3, 4, 5):
+            flat_reconstruction[step] = 77
+        _capture(measure_drift, monkeypatch, 77)
+
+        found = measure_drift.measure(baked, Path("shot.png"), 5, window=5, overscan=8)
+
+        assert found == 5
+
+    def test_a_clear_winner_still_beats_a_nearer_tie(
+        self, measure_drift, monkeypatch, baked, flat_reconstruction
+    ):
+        flat_reconstruction[2] = 100
+        flat_reconstruction[4] = 130
+        flat_reconstruction[5] = 130
+        _capture(measure_drift, monkeypatch, 100)
+
+        found = measure_drift.measure(baked, Path("shot.png"), 5, window=5, overscan=8)
+
+        assert found == 2

@@ -243,6 +243,7 @@ static void apply_frame(uint32_t frame)
  * an index calculation rather than a walk. Records carry a start frame, an
  * end frame, and the glyph rows already laid out and centred by the baker,
  * because none of that fits in a vblank. */
+#if MOVIE_SUBTITLE_COUNT > 0
 #define SUBTITLE_RECORD_BYTES (8u + MOVIE_SUBTITLE_COLUMNS * MOVIE_SUBTITLE_LINES)
 
 static uint32_t subtitle_word(uint16_t index, uint16_t offset)
@@ -278,6 +279,7 @@ static uint16_t subtitle_at(uint32_t frame)
     }
     return low;
 }
+#endif
 
 static uint32_t keyframe_at_or_before(uint32_t frame)
 {
@@ -330,8 +332,10 @@ int main(void)
     uint8_t previous_start = (uint8_t)(~REG_STATUS_B & STATUS_START);
     debug_stats diag = {0};
     uint8_t debug_visible = 0;
-    uint8_t subtitles_on = MOVIE_SUBTITLE_COUNT > 0;
+#if MOVIE_SUBTITLE_COUNT > 0
+    uint8_t subtitles_on = 1;
     uint16_t resident_cue = MOVIE_SUBTITLE_COUNT;
+#endif
     uint16_t overlay_tick = 0;
     uint8_t overlay_visible = 0;
 
@@ -375,13 +379,15 @@ int main(void)
                 audio_seek(frame);
             }
         }
-        if ((pressed & PAD_DOWN) && MOVIE_SUBTITLE_COUNT > 0) {
+#if MOVIE_SUBTITLE_COUNT > 0
+        if (pressed & PAD_DOWN) {
             subtitles_on = (uint8_t)!subtitles_on;
             if (!subtitles_on) {
                 menu_subtitle_hide();
             }
             resident_cue = MOVIE_SUBTITLE_COUNT;
         }
+#endif
         if (pressed & PAD_UP) {
             debug_visible = (uint8_t)!debug_visible;
             if (!debug_visible) {
@@ -484,6 +490,7 @@ int main(void)
             overlay_visible = 0;
         }
 
+#if MOVIE_SUBTITLE_COUNT > 0
         if (subtitles_on) {
             uint16_t cue = subtitle_at(frame);
 
@@ -496,6 +503,7 @@ int main(void)
                 }
             }
         }
+#endif
 
         if (frame_updates > diag.peak_updates) {
             diag.peak_updates = frame_updates;

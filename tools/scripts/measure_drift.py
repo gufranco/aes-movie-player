@@ -28,6 +28,9 @@ from aesmovie import neocolor
 # The menu owns the first sixteen palettes, so video starts above them.
 VIDEO_BASE_BANK = 16
 
+_TIE = 1e-9
+"""Errors this close are the same picture, not a better one."""
+
 
 def _both_halves(epoch: int, colors: np.ndarray) -> np.ndarray:
     """Place an epoch's palettes in the CRAM half it occupies.
@@ -69,8 +72,14 @@ def measure(baked: Path, capture: Path, expected: int, window: int, overscan: in
         painted = player.render(reader, _both_halves(epoch, colors), VIDEO_BASE_BANK)
         rgb = neocolor.color_index_to_rgb(painted)
         error = float(np.abs(rgb[:, left:right, :].astype(np.int16) - target).mean())
-        if error < best_error:
+        if error < best_error - _TIE:
             best_error, best_frame = error, step
+        elif abs(error - best_error) <= _TIE and best_frame is not None:
+            # A static shot repeats itself exactly, so the match is a run of
+            # frames rather than one. The player is somewhere in that run, and
+            # the only defensible pick is the end nearest where it should be.
+            if abs(step - expected) < abs(best_frame - expected):
+                best_error, best_frame = min(best_error, error), step
 
     print(f"capture taken after {expected} vblanks")
     if best_frame is None:
