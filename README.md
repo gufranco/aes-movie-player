@@ -347,6 +347,16 @@ tile count here did not move by one entry while error rose fourfold. A
 deferred correction still has to point at a tile, so the tile is interned
 later regardless, just against a picture that has drifted further.
 
+**A narrower raster.** Real cartridges run 304 or 288 pixels wide instead of
+320, and dropping 32 columns removes a tenth of the slots, so a tenth of the
+tile budget looked like it should come back. Blanking the outer 16 pixels on
+each side of a 40 second window moved the tile count from 35,136 to 35,779:
+it went *up*. Blanking the same 32 pixels down the middle instead took it to
+30,098. The same area is worth 14% of the dictionary in the centre and less
+than nothing at the edges, because cost follows novel detail and framing puts
+the detail in the middle. A narrower raster buys a smaller picture and no
+budget, so width stays at 320.
+
 **Flip deduplication.** 67 saved tiles out of 81,044. Exact 16x16 mirrors
 essentially do not occur in photographed or rendered material.
 
