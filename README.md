@@ -10,8 +10,8 @@ console at all. An offline baker turns a video file into cartridge ROM
 images, and the on-cart player does nothing at runtime but push pre-computed
 tile numbers into sprite control blocks once per vblank.
 
-A ten minute movie fits in a 139 MB cartridge, plays at 14.8 fps with sound,
-and reproduces bit-exactly what the baker predicted.
+A ten minute movie fits in a 158 MB cartridge, plays every frame at 59.2 fps
+with sound, and reproduces bit-exactly what the baker predicted.
 
 ## Contents
 
@@ -25,6 +25,7 @@ and reproduces bit-exactly what the baker predicted.
 - [Verification](#verification)
 - [What did not work](#what-did-not-work)
 - [Hardware notes worth knowing](#hardware-notes-worth-knowing)
+- [State of the work](#state-of-the-work)
 - [Repository layout](#repository-layout)
 
 ## How it works
@@ -84,7 +85,7 @@ Read from the source of two independent emulators rather than from prose.
 | Resource | Ceiling | Consequence |
 |---|---|---|
 | Character ROM | 20-bit tile number, 1,048,576 tiles, 128 MiB | The binding constraint at every quality tier |
-| Program ROM | 3-bit bank latch, 8 banks of 1 MiB | Command stream. Used 3.0 MB for ten minutes, never close |
+| Program ROM | 3-bit bank latch, 8 banks of 1 MiB | Command stream. Used 4.5 MB across 5 banks for ten minutes |
 | ADPCM-B voice ROM | 16 MiB of 4-bit samples, reached through a 16-bit page counter | About 10 minutes at the chip's 55.6 kHz ceiling. Longer sources get the highest rate that still ends on an addressable page |
 | Sprites per scanline | 96 | The grid uses 20 |
 | Palettes | 256 banks of 16 colours, index 0 transparent | 240 for video, 16 reserved for the menu |
@@ -118,47 +119,38 @@ Calibration
 Quality ladder for this source
   tier      picture                                  fps     holds               verdict
   ------------------------------------------------------------------------------------
-  q01       every frame, colour at 100%             59.2      4:29          over by 5:49
-  q02       every frame, colour at 89%              59.2      4:57          over by 5:24
-  q03       every frame, colour at 79%              59.2      5:27          over by 4:56
-  q04       every frame, colour at 70%              59.2      6:01          over by 4:25
-  q05       every frame, colour at 62%              59.2      6:38          over by 3:51
-  q06       every frame, colour at 54%              59.2      7:18          over by 3:14
-  q07       every frame, colour at 48%              59.2      8:03          over by 2:33
-  q08       every frame, colour at 42%              59.2      8:52          over by 1:47
-  q09       every frame, colour at 37%              59.2      9:46          over by 0:57
-  q10       every frame, colour at 31%              59.2     10:46          over by 0:02
-  q11       every frame, colour at 24%              59.2     11:53      fits, 0:59 spare
-  q12       every frame, colour at 20%              59.2     13:06      fits, 2:06 spare
-  q13       every frame, colour at 16%              59.2     14:25      fits, 3:20 spare
-  q14       every frame, colour at 12%              59.2     15:54      fits, 4:41 spare
-  q15       20 fps, colour at 12%                   19.7     17:02      fits, 5:44 spare
-  q16       15 fps, colour at 12%                   14.8     18:41      fits, 7:14 spare
-  q17       12 fps, colour at 12%                   11.8     20:13      fits, 8:40 spare
-  q18       10 fps, colour at 12%                    9.9     21:49     fits, 10:08 spare
+  q01       every frame, colour at 100%             59.2      7:28          over by 3:05
+  ...
+  q15       every frame, colour at 42%              59.2     10:46          over by 0:03
+  q16       every frame, colour at 39%              59.2     11:05      fits, 0:15 spare
+  q17       every frame, colour at 37%              59.2     11:25      fits, 0:34 spare
+  ...
+  q30       every frame, colour at 8%               59.2     19:39      fits, 8:08 spare
+  q31       30 fps, colour at 8%                    29.6     21:44     fits, 10:03 spare
+  q35       10 fps, colour at 8%                     9.9     43:14     fits, 29:50 spare
 
-Selected: q11
-  every frame, colour at 24%
-  chroma weight 0.24, frame hold 1, tolerance 0.0032, denoise 0.0
-  holds 11:53, uses 9:56, 0:59 spare
+Selected: q17
+  every frame, colour at 37%
+  chroma weight 0.37, frame hold 1, tolerance 0.0026, denoise 0.0
+  holds 11:25, uses 9:56, 0:34 spare
 
-To reach 'q10' instead (every frame, colour at 31%):
-  Trim 0:02, bringing the source to 9:54 or shorter.
+To reach 'q16' instead (every frame, colour at 39%):
+  Trim 0:24, bringing the source to 9:33 or shorter.
 
 Cartridge budget at this tier
-  C-ROM    107.1 MiB of 128.0 MiB     84%   877,391 tiles
-  audio     15.8 MiB of 16.0 MiB     99%   at 55.6 kHz, grade 1 of 18
+  C-ROM    114.8 MiB of 128.0 MiB     90%   940,789 tiles
+  audio     15.8 MiB of 16.0 MiB     99%   at 55.6 kHz, grade 1 of 35
 ```
 
 Every tier is listed whether it fits or not, with the exact overshoot, so
 trimming the source stays a decision made with the numbers in view.
 Calibration takes under a minute where a bake takes hours.
 
-The eighteen rungs are not an arbitrary subdivision. Each one was measured,
+The thirty-five rungs are not an arbitrary subdivision. Each one was measured,
 and the ladder keeps only the settings that were not beaten on both axes at
 once: a rung that costs more than its neighbour and looks no better does
 not appear. That is why colour falls in uneven steps and why frame rate
-only starts dropping at `q15`, once cheapening colour further has stopped
+only starts dropping at `q31`, once cheapening colour further has stopped
 buying anything. An earlier hand-picked ladder had a rung that was strictly
 worse than the one below it, which is the failure this ordering removes.
 
@@ -316,16 +308,8 @@ crop had been hiding. Excluding it, the residual is a smooth per-level
 difference, the signature of a different digital-to-analog model rather than
 a structural disagreement. Both are emulator-side.
 
-The full-length bake, for reference:
-
-| Quantity | Value |
-|---|---|
-| Frames | 35,274 |
-| Tiles used | 569,787 of a 1,048,576 budget |
-| Command stream | 3.0 MB across 3 of 8 banks |
-| Keyframes | 716 |
-| Mean slot updates per frame | 16.7 of 280 |
-| Cartridge | 139 MB |
+The full-length bake is recorded under
+[State of the work](#state-of-the-work), so it is not repeated here.
 
 ## What did not work
 
@@ -391,7 +375,7 @@ of every frame against the true source frame instead.
 ## Hardware notes worth knowing
 
 The address port sits at 0x3C0000 and the data port immediately after it, so
-a single 32-bit write lands both. Every scattered VRAM write costs one
+a single 32-bit write lands both, and every scattered VRAM write costs one
 instruction instead of two. Runs still stream through the auto-increment
 port, where one write per word is already the floor.
 
@@ -468,10 +452,8 @@ default, so a capture shows 304 of the 320 active columns unless zeroed.
   derives its mask from the ROM size and allows up to 8 bits. A stream
   needing more than 8 banks works in geolith and reads the wrong bank on
   hardware, so the baker enforces MAME's limit.
-- **C-ROM banking does not exist.** Neither emulator implements it on any
-  board, including every bootleg mapper MAME carries, and it cannot exist:
-  2^20 tiles at 128 bytes is exactly the 128 MiB the 20-bit tile number
-  addresses. 128 MiB is an absolute ceiling, not a per-bank window.
+- **C-ROM banking does not exist**, as the ceilings table above records.
+  Both emulators agree by omission: neither implements it on any board.
 
 One consequence shapes the whole encoder: there is no framebuffer, so there
 are no additive residuals. A correction cannot nudge a pixel, it can only
@@ -568,8 +550,40 @@ with `debug_visible = 1` and capture.
    blocks show.
 5. **Lowercase subtitle glyphs.** The pipeline works end to end and is
    verified on screen; the font is uppercase plus comma, apostrophe,
-   question and exclamation.
-6. **Real hardware.** Nothing here has run on an AES.
+   question and exclamation. The remaining work is 26 hand-drawn 8x8
+   glyphs with descenders in a cell that leaves four rows of x-height.
+6. **A tier above `q17`.** The ladder runs up to `q01` and the bake stops at
+   `q17` because that is the highest rung fitting 9:56 untrimmed. `q16`
+   needs about 24 seconds trimmed. Each step is a fresh 40 minute bake and
+   the trim is an editorial decision, so it waits for a call rather than a
+   measurement.
+7. **Real hardware.** Nothing here has run on an AES. Until it does, every
+   hardware claim has to come from documentation or emulator source, never
+   from two emulators agreeing.
+
+### Standing rules for this project
+
+Requests that outlive any single change.
+
+- **Nothing hardcoded that the source can decide.** Hardware limits are
+  fixed; anything else is measured. The audit of which is which is under
+  [The quality system](#the-quality-system), and the values the current bake
+  derived are in the table above.
+- **Extract the maximum quality the hardware allows,** losing only what a
+  viewer cannot perceive. Every lever that was tried and failed is under
+  [What did not work](#what-did-not-work), so it is not tried twice.
+- **Give the decision to the operator.** The plan prints every rung with its
+  exact overshoot so trimming stays a choice made with numbers in view.
+- **Motion blur stays out.** Revisiting it was considered and declined. It
+  cannot help the blocking, which has spatial causes, and blending at full
+  frame rate reads as a smear. The only defensible case would be shutter
+  blending at `frame_hold > 1`, which no current bake uses.
+- **Judge picture quality by eye, not by the metric.** `displayed_error`
+  ranked frame blending the strongest lever available and it looked awful on
+  the cartridge. Numbers decide cost; a person decides quality.
+- **Verify deep frames from the on-screen counters.** See the warning about
+  `measure_drift.py` above. Reporting a regression that a stale capture
+  invented happened twice in one session.
 
 ## Repository layout
 
