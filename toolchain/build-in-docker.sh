@@ -35,7 +35,7 @@ retry_build() {
     done
 }
 
-BUILD=build
+BUILD="${BUILD:-build}"
 ROM="$BUILD/rom"
 BAKED="$BUILD/baked"
 GENERATED="$BUILD/generated"
