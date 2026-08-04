@@ -90,6 +90,15 @@ class TestEncoding:
 
         assert fixtiles.GLYPHS["A"] in row
 
+    def test_lowercase_keeps_its_own_shape_rather_than_folding_to_capitals(self):
+        cues = subtitles.parse("1\n00:00:00,000 --> 00:00:01,000\nag\n")
+
+        row = subtitles.encode(cues, fps=60.0)[8 : 8 + subtitles.COLUMNS]
+
+        assert fixtiles.GLYPHS["a"] in row
+        assert fixtiles.GLYPHS["g"] in row
+        assert fixtiles.GLYPHS["A"] not in row
+
     def test_an_unknown_character_becomes_a_blank(self):
         cues = subtitles.parse("1\n00:00:00,000 --> 00:00:01,000\n§\n")
 

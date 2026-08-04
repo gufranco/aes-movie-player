@@ -96,8 +96,9 @@ def layout(text: str) -> tuple[str, ...]:
 def _glyph(character: str) -> int:
     if character in _PUNCTUATION:
         return fixtiles.GLYPHS.get(_PUNCTUATION[character], fixtiles.GLYPHS["blank"])
-    upper = character.upper()
-    return fixtiles.GLYPHS.get(upper, fixtiles.GLYPHS["blank"])
+    if character in fixtiles.GLYPHS:
+        return fixtiles.GLYPHS[character]
+    return fixtiles.GLYPHS.get(character.upper(), fixtiles.GLYPHS["blank"])
 
 
 def _row(line: str) -> bytes:
