@@ -147,8 +147,8 @@ def measure_anchors(
 
     measured: dict[float, float] = {}
     reference_rate = 0.0
-    for chroma in quality.ANCHOR_CHROMA:
-        tier = quality.nearest_by_chroma(chroma)
+    anchors = quality.anchor_tiers(float(info.fps), float(frames.VBLANK_FPS))
+    for tier in anchors:
         rate = _encode_rate(clip, tier, seed=seed) / minutes
         measured[tier.relative_cost] = rate
         if tier.name == quality.REFERENCE_TIER:
