@@ -7,7 +7,7 @@
 <br>
 
 [![Licence](https://img.shields.io/badge/licence-GPL--3.0-blue?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-627%20passing-brightgreen?style=flat-square)](tools/tests)
+[![Tests](https://img.shields.io/badge/tests-649%20passing-brightgreen?style=flat-square)](tools/tests)
 [![Hardware](https://img.shields.io/badge/runs%20on-real%20AES%20%2B%20MVS-success?style=flat-square)](#on-real-hardware)
 [![Target](https://img.shields.io/badge/target-Neo%20Geo%20AES-red?style=flat-square)](#hardware-ceilings)
 [![Verified](https://img.shields.io/badge/verified-geolith%20%2B%20MAME-blueviolet?style=flat-square)](#verification)
@@ -24,7 +24,7 @@
 
 <div align="center">
 
-**158 MB** cartridge · **35,274** frames · **59.2** fps · **846,784** tiles · **81%** of the C-ROM ceiling · **627** tests
+**158 MB** cartridge · **35,274** frames · **59.2** fps · **846,784** tiles · **81%** of the C-ROM ceiling · **649** tests
 
 <br>
 
@@ -181,6 +181,9 @@ Read from the source of two independent emulators rather than from prose.
 
 ## Quick start
 
+Any video file ffmpeg can read works. Nothing has to live in a particular
+folder, and nothing has to be named a particular way: you pass the path.
+
 ### Prerequisites
 
 | Tool | Version | Install |
@@ -188,43 +191,84 @@ Read from the source of two independent emulators rather than from prose.
 | Python | >= 3.12 | [python.org](https://www.python.org) |
 | uv | latest | [docs.astral.sh/uv](https://docs.astral.sh/uv/) |
 | ffmpeg and ffprobe | any recent | [ffmpeg.org](https://ffmpeg.org) |
-| m68k toolchain | ngdevkit | see [Toolchain](#toolchain) below |
-| Neo Geo BIOS | any | required by the emulators only |
+| m68k toolchain | ngdevkit | [Toolchain](#toolchain), one command |
+| Neo Geo BIOS | any | only to run the emulators, not to build |
 
-### Bake and build
-
-```bash
-# what could this source become?
-uv --project tools run python -m aesmovie.plan --source film.mkv
-
-# bake at the tier it picks
-uv --project tools run python -m aesmovie.bake \
-    --source film.mkv --start 0 --duration 596 --quality auto \
-    --build-dir build --preview build/preview.mp4
-
-# build the cartridge
-bash toolchain/build-in-docker.sh
-```
-
-### Verify
+### One command
 
 ```bash
-bash tools/scripts/verify_mame.sh
+uv --project tools run python -m aesmovie.cartridge ~/Movies/my-film.mkv
 ```
 
-The build emits a `.neo` for flash carts and emulators plus a MAME
-software-list archive, and prints the spacing check on the way through:
+That measures the source, picks the highest quality tier that fits a
+cartridge, bakes it, builds the ROM, and leaves a `.neo` in `build/`. With a
+subtitle file:
 
-```
-CHECK VRAM write spacing
-VRAM write spacing clears the 12 and 16 cycle minimums across 2 object(s)
+```bash
+uv --project tools run python -m aesmovie.cartridge ~/Movies/my-film.mkv \
+    --subtitles ~/Movies/my-film.srt
 ```
 
-`--quality` takes a tier name or `auto`. Individual flags such as
-`--chroma-weight` override the tier, and the tier overrides the defaults.
-`--target-fps` states a wanted frame rate instead of a hold, and the baker
-refuses a hold that would drop no source frame rather than silently doing
-nothing.
+`--subtitles` is optional twice over: leave it off and a `.srt` sitting beside
+the source under the same name is picked up on its own. Point it anywhere when
+the names do not match.
+
+### What happens, and how long it takes
+
+| Step | What it does | Roughly |
+|:-----|:-------------|:--------|
+| Calibrate | Samples 24 short windows and measures what the content costs in tiles | Under a minute |
+| Choose | Prints the full ladder and picks the best rung that fits | Instant |
+| Bake | Quantizes, fits palettes, interns every tile, encodes audio | Hours for a feature |
+| Build | Compiles the player and packs the ROM images | A couple of minutes |
+
+The ladder is printed before the bake starts, because that choice is the one
+worth arguing with and a bake is far too slow to be where the argument
+happens. If nothing fits, it stops and tells you how much to trim rather than
+baking something that would run out of dictionary partway through.
+
+### Common flags
+
+| Flag | Use |
+|:-----|:----|
+| `--subtitles PATH` | A SubRip `.srt`. Defaults to one beside the source |
+| `--quality q17` | Force a tier instead of measuring. `auto` is the default |
+| `--start 90 --duration 300` | Take five minutes starting at 1:30 rather than the whole file |
+| `--build-dir DIR` | Put everything somewhere other than `build/` |
+| `--preview out.mp4` | Also render what the cartridge will show, for checking by eye |
+| `--bake-only` | Stop before the ROM build |
+| `--fit letterbox` | Letterbox instead of filling the 320x224 raster |
+
+### What you get
+
+| Path | What it is |
+|:-----|:-----------|
+| `build/aesmovie.neo` | The cartridge. This is the file a NeoSD or an emulator loads |
+| `build/aesmovie.zip` | The same ROMs as a MAME software-list archive |
+| `build/mame-hash/neogeo.xml` | The software-list entry MAME needs to find that archive |
+| `build/baked/` | The intermediate ROM images, kept so the ROM can be rebuilt without re-baking |
+| `build/preview.mp4` | Only when `--preview` was asked for |
+
+### Running it
+
+On hardware, copy `build/aesmovie.neo` to a NeoSD flash cart and load it like
+any other title. That is how [the AES and MVS runs](#on-real-hardware) were
+done.
+
+Under MAME, point it at the archive and the hash file the build wrote. The
+BIOS has to be on the ROM path too, so give both directories:
+
+```bash
+mame aes -bios unibios23 -cart aesmovie \
+    -rompath build:/path/to/bios -hashpath build/mame-hash
+```
+
+[`verify_mame.sh`](tools/scripts/verify_mame.sh) does that staging for you and
+then compares what MAME drew against the baker's own render.
+
+Under a libretro front end, load `build/aesmovie.neo` with the geolith core.
+Set `geolith_overscan_*` to zero to see all 320 columns; the default crops
+eight pixels a side.
 
 ### Toolchain
 
@@ -246,6 +290,53 @@ toolchain is on the path and re-executes itself in a container only when one
 is not, so a machine with the toolchain installed never pays for the
 container. That fallback path is amd64 under emulation, because the PPA has
 no arm64 build.
+
+Every build runs the VRAM write-spacing check over the compiled objects and
+stops on a pair under the documented minimum:
+
+```
+CHECK VRAM write spacing
+VRAM write spacing clears the 12 and 16 cycle minimums across 2 object(s)
+```
+
+<details>
+<summary><strong>Running the steps separately</strong></summary>
+
+<br>
+
+The one command above is the three below, in order. Run them by hand when you
+want to look at the ladder before committing to a bake, or to rebuild the ROM
+without re-baking.
+
+```bash
+# what could this source become? prints every tier and its overshoot
+uv --project tools run python -m aesmovie.plan --source my-film.mkv
+
+# bake. --duration defaults to the rest of the file
+uv --project tools run python -m aesmovie.bake \
+    --source my-film.mkv --quality auto \
+    --subtitles my-film.srt --build-dir build --preview build/preview.mp4
+
+# build the ROM from whatever is already baked
+bash toolchain/build-in-docker.sh
+```
+
+The baker carries far more knobs than the wrapper exposes, and every one of
+them overrides the tier that `auto` chose:
+`--chroma-weight`, `--denoise`, `--frame-hold`, `--target-fps`, `--tolerance`,
+`--keyframe-interval`, `--palette-epoch-seconds`, `--tile-budget`,
+`--scene-cut-floor`, `--candidates`, `--sample-stride`, `--seed`.
+`--target-fps` states a wanted frame rate instead of a hold, and the baker
+refuses a hold that would drop no source frame rather than silently doing
+nothing.
+
+To check a finished cartridge against MAME:
+
+```bash
+bash tools/scripts/verify_mame.sh
+```
+
+</details>
 
 ## The quality system
 
@@ -735,8 +826,13 @@ it is written up with its limits under
 
 ### The cartridge on disk
 
-Baked from `assets/clip/big_buck_bunny_720p_h264.mov`, full length, with
-every parameter measured from the source rather than fixed.
+Big Buck Bunny is the test subject, not the product. It is here because it is
+freely licensed, long enough to stress the dictionary, and unchanging between
+runs, so numbers taken from it are comparable. Any file ffmpeg reads goes
+through the same path: see [Quick start](#quick-start).
+
+The figures below come from baking `assets/clip/big_buck_bunny_720p_h264.mov`
+full length, with every parameter measured from the source rather than fixed.
 
 | Quantity | Value |
 |---|---|
