@@ -66,6 +66,21 @@ the transport or the diagnostics page is also writing to the fix layer.
 """
 
 WORDS_PER_PALETTE: Final = 16
+
+SAMPLES_PER_EPOCH: Final = 64
+"""How many frames each epoch's palettes are fitted from.
+
+This is the quantity that decides palette quality, so it is the one worth
+holding steady. Fixing the stride instead let it drift with the epoch
+length, which is measured from the source and therefore varies per film.
+"""
+
+
+def stride_for_epoch(*, epoch_frames: int) -> int:
+    """Sample every nth frame, so an epoch contributes about the target count."""
+    return max(1, round(epoch_frames / SAMPLES_PER_EPOCH))
+
+
 FIX_PALETTE_BANK: Final = 1
 S_ROM_BYTES: Final = 131072
 
@@ -789,7 +804,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--scene-cut-ratio", type=float, default=0.90)
     parser.add_argument("--candidates", type=int, default=None)
     parser.add_argument("--flip", action="store_true")
-    parser.add_argument("--sample-stride", type=int, default=8)
+    parser.add_argument("--sample-stride", type=int, default=None)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--preview", type=Path, default=None)
     parser.add_argument("--report-json", type=Path, default=None)
@@ -888,10 +903,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.palette_epoch_seconds is not None
         else content.epoch_seconds_for(cuts_per_minute=profile.cuts_per_minute)
     )
+    sample_stride = (
+        args.sample_stride
+        if args.sample_stride is not None
+        else stride_for_epoch(epoch_frames=round(palette_epoch_seconds * float(frames.VBLANK_FPS)))
+    )
     print(
         f"measured from the source: scene cut floor {scene_cut_floor:.5f},"
         f" palette epoch {palette_epoch_seconds:.1f}s"
-        f" ({profile.cuts_per_minute:.1f} cuts/min, saturation {profile.saturation:.1f})",
+        f" ({profile.cuts_per_minute:.1f} cuts/min, saturation {profile.saturation:.1f}),"
+        f" palette sample every {sample_stride} frames",
         file=sys.stderr,
     )
     frame_hold = _resolve_frame_hold(args, tier)
@@ -922,7 +943,7 @@ def main(argv: list[str] | None = None) -> int:
             scene_cut_ratio=args.scene_cut_ratio,
             candidates=_pick(args.candidates, tier.candidates if tier else None, 12),
             allow_flip=args.flip,
-            sample_stride=args.sample_stride,
+            sample_stride=sample_stride,
             seed=args.seed,
             preview=args.preview,
             audio_rate_hz=audio_rate,

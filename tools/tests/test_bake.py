@@ -868,3 +868,29 @@ class TestTheOverlayNamesTheRungActuallyUsed:
             bake.main(["--source", "clip.mp4", "--duration", "1", "--quality", "auto"])
 
         assert captured["quality"] == "q07"
+
+
+class TestPaletteSampling:
+    """How densely palettes are fitted should follow the epoch, not a constant.
+
+    The sample stride was every eighth frame regardless of anything else, so
+    the number of frames each epoch was fitted from drifted with the epoch
+    length, which is itself measured from the source. Targeting a sample
+    count per epoch keeps palette quality steady instead.
+    """
+
+    def test_a_longer_epoch_gets_a_coarser_stride(self):
+        long_epoch = bake.stride_for_epoch(epoch_frames=1200)
+        short_epoch = bake.stride_for_epoch(epoch_frames=120)
+
+        assert long_epoch > short_epoch
+
+    def test_the_stride_is_never_below_one(self):
+        assert bake.stride_for_epoch(epoch_frames=1) >= 1
+
+    def test_an_epoch_yields_about_the_target_sample_count(self):
+        frames_per_epoch = 900
+
+        stride = bake.stride_for_epoch(epoch_frames=frames_per_epoch)
+
+        assert abs(frames_per_epoch / stride - bake.SAMPLES_PER_EPOCH) < bake.SAMPLES_PER_EPOCH
