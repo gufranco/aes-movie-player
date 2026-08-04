@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import importlib.util
 import json
 import subprocess
@@ -749,3 +750,43 @@ class TestSceneAlignedEpochs:
         )
 
         assert len(outcome.result.epoch_starts) > 1
+
+
+class TestEpochsGiveTheLoaderTime:
+    """An epoch must outlast the upload of the one after it.
+
+    The player writes the next epoch's palettes into the other half of
+    CRAM a slice per frame. A boundary that arrives before that finishes
+    leaves the half holding the epoch before last, and the picture comes
+    back as a checkerboard of two scenes.
+    """
+
+    def test_no_epoch_is_shorter_than_the_upload_needs(self, synthetic_clip, tmp_path):
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=synthetic_clip,
+                start=0.0,
+                duration=1.0,
+                build_dir=tmp_path / "spaced",
+                palette_count=8,
+                palette_epoch_seconds=0.05,
+            )
+        )
+
+        starts = outcome.result.epoch_starts
+        for earlier, later in itertools.pairwise(starts):
+            assert later - earlier >= bake.MIN_EPOCH_FRAMES
+
+    def test_a_cadence_below_the_minimum_collapses_to_one_epoch(self, synthetic_clip, tmp_path):
+        outcome = bake.run(
+            bake.BakeRequest(
+                source=synthetic_clip,
+                start=0.0,
+                duration=1.0,
+                build_dir=tmp_path / "single",
+                palette_count=8,
+                palette_epoch_seconds=0.01,
+            )
+        )
+
+        assert len(outcome.result.epoch_starts) == 1

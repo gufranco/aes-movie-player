@@ -6,8 +6,15 @@
 /* The fix layer is 32 rows but the raster only shows rows 2 to 29, so the
  * panel is anchored to row 29 rather than to the nominal bottom. Sitting it
  * any higher leaves a band of video below the overlay. */
+/* The fix layer is 32 rows but the raster only shows rows 2 to 29, so the
+ * panel is anchored to row 29 rather than to the nominal bottom.
+ *
+ * The panel reaches the edge but its contents do not. A television
+ * overscans, losing something like the outermost cell on every side, so
+ * text written on the last visible row is text the viewer may never
+ * see. The bottom row is left as padding for that reason. */
 #define MENU_LAST_ROW   29
-#define MENU_ROWS       4
+#define MENU_ROWS       5
 #define MENU_TOP_ROW    (MENU_LAST_ROW - MENU_ROWS + 1)
 #define MENU_COLS       40
 
@@ -205,42 +212,59 @@ void menu_debug_hide(void)
     }
 }
 
-void menu_debug(const debug_stats *stats)
+/* One row per frame. Writing the whole page at once is several hundred
+ * cells, which does not fit in vblank: the writes spill into active
+ * display and the sprite layer comes back shredded. Spread this way the
+ * page costs about as much as a single row of text. */
+void menu_debug_row(const debug_stats *stats, uint16_t slot)
 {
     uint16_t row = DEBUG_TOP_ROW;
 
-    for (uint16_t col = 0; col < MENU_COLS; col++) {
-        for (uint16_t line = 0; line < DEBUG_ROWS; line++) {
-            fix_poke(col, (uint16_t)(DEBUG_TOP_ROW + line), FIX_TILE_PANEL);
-        }
+    if (slot >= DEBUG_ROWS) {
+        return;
     }
-
-    draw_field(DEBUG_LEFT, row, "WIDTH", MOVIE_IMAGE_WIDTH, 3);
-    draw_field(20, row, "HIGH", MOVIE_IMAGE_HEIGHT, 3);
-    row++;
-    draw_field(DEBUG_LEFT, row, "FPS", MOVIE_FPS_NUM / MOVIE_FPS_DEN, 2);
-    draw_field(20, row, "HOLD", MOVIE_FRAME_HOLD, 1);
-    row++;
-    draw_text(DEBUG_LEFT, row, "TIER");
-    draw_text((uint16_t)(DEBUG_LEFT + 5), row, MOVIE_TIER_NAME);
-    draw_field(20, row, "CHROMA", MOVIE_CHROMA_PERCENT, 3);
-    row++;
-    draw_field(DEBUG_LEFT, row, "EPOCHS", MOVIE_EPOCH_COUNT, 4);
-    draw_field(20, row, "CROM", MOVIE_CROM_PERCENT, 3);
-    row++;
-    draw_field(DEBUG_LEFT, row, "AUDIO HZ", MOVIE_AUDIO_HZ, 5);
-    draw_field(20, row, "TILES", MOVIE_TILE_COUNT / 1000u, 4);
-    row++;
-
-    draw_field(DEBUG_LEFT, row, "FRAME", stats->frame, 6);
-    draw_field(20, row, "OF", stats->total, 6);
-    row++;
-    draw_field(DEBUG_LEFT, row, "EPOCH", stats->epoch, 4);
-    draw_field(20, row, "BANK", stats->bank, 1);
-    row++;
-    draw_field(DEBUG_LEFT, row, "UPDATE", stats->updates, 3);
-    draw_field(20, row, "PEAK", stats->peak_updates, 3);
-    row++;
-    draw_field(DEBUG_LEFT, row, "APAGE", stats->audio_page, 5);
-    draw_field(20, row, "OVERRUN", stats->overruns, 5);
+    for (uint16_t col = 0; col < MENU_COLS; col++) {
+        fix_poke(col, (uint16_t)(DEBUG_TOP_ROW + slot), FIX_TILE_PANEL);
+    }
+    row = (uint16_t)(DEBUG_TOP_ROW + slot);
+    switch (slot) {
+    case 0:
+        draw_field(DEBUG_LEFT, row, "WIDTH", MOVIE_IMAGE_WIDTH, 3);
+        draw_field(20, row, "HIGH", MOVIE_IMAGE_HEIGHT, 3);
+        break;
+    case 1:
+        draw_field(DEBUG_LEFT, row, "FPS", MOVIE_FPS_NUM / MOVIE_FPS_DEN, 2);
+        draw_field(20, row, "HOLD", MOVIE_FRAME_HOLD, 1);
+        break;
+    case 2:
+        draw_text(DEBUG_LEFT, row, "TIER");
+        draw_text((uint16_t)(DEBUG_LEFT + 5), row, MOVIE_TIER_NAME);
+        draw_field(20, row, "CHROMA", MOVIE_CHROMA_PERCENT, 3);
+        break;
+    case 3:
+        draw_field(DEBUG_LEFT, row, "EPOCHS", MOVIE_EPOCH_COUNT, 4);
+        draw_field(20, row, "CROM", MOVIE_CROM_PERCENT, 3);
+        break;
+    case 4:
+        draw_field(DEBUG_LEFT, row, "AUDIO HZ", MOVIE_AUDIO_HZ, 5);
+        draw_field(20, row, "TILES", MOVIE_TILE_COUNT / 1000u, 4);
+        break;
+    case 5:
+        draw_field(DEBUG_LEFT, row, "FRAME", stats->frame, 6);
+        draw_field(20, row, "OF", stats->total, 6);
+        break;
+    case 6:
+        draw_field(DEBUG_LEFT, row, "EPOCH", stats->epoch, 4);
+        draw_field(20, row, "BANK", stats->bank, 1);
+        break;
+    case 7:
+        draw_field(DEBUG_LEFT, row, "UPDATE", stats->updates, 3);
+        draw_field(20, row, "PEAK", stats->peak_updates, 3);
+        break;
+    default:
+        draw_field(DEBUG_LEFT, row, "APAGE", stats->audio_page, 5);
+        draw_field(20, row, "OVERRUN", stats->overruns, 5);
+        break;
+    }
 }
+

@@ -283,8 +283,11 @@ int main(void)
     uint32_t frame = 0;
     uint16_t overlay_timer = OVERLAY_HOLD_FRAMES;
     uint16_t rewind_countdown = REWIND_FRAMES_PER_STEP;
-    uint8_t previous_pad = 0;
-    uint8_t previous_start = 0;
+    /* Seed these from the pad as it actually reads, so the very first
+     * iteration compares against reality. Starting them at zero makes
+     * every bit that happens to be set at boot look freshly pressed. */
+    uint8_t previous_pad = (uint8_t)~REG_P1CNT;
+    uint8_t previous_start = (uint8_t)(~REG_STATUS_B & STATUS_START);
     debug_stats diag = {0};
     uint8_t debug_visible = 0;
     uint16_t overlay_tick = 0;
@@ -432,17 +435,17 @@ int main(void)
             overlay_visible = 0;
         }
 
-        if (debug_visible && (overlay_tick & OVERLAY_REDRAW_MASK) == 0) {
+        if (frame_updates > diag.peak_updates) {
+            diag.peak_updates = frame_updates;
+        }
+        if (debug_visible) {
             diag.frame = frame;
             diag.total = MOVIE_FRAME_COUNT;
             diag.epoch = resident_epoch;
             diag.bank = stream_bank;
             diag.audio_page = audio_page_for(frame);
             diag.updates = frame_updates;
-            if (frame_updates > diag.peak_updates) {
-                diag.peak_updates = frame_updates;
-            }
-            menu_debug(&diag);
+            menu_debug_row(&diag, (uint16_t)(overlay_tick & 0x0Fu));
         }
         overlay_tick++;
     }

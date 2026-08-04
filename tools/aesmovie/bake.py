@@ -37,6 +37,11 @@ ADPCM_B_BYTES: Final = 16 << 20
 V_ROM_MIN_BYTES: Final = 1 << 19
 MAX_SAMPLE_TILES: Final = 200_000
 _SCENE_CUT_SHARE: Final = 0.6
+
+# The player writes 48 palette words a frame, and an epoch holds 120
+# palettes of 16 words, so a new set takes 40 frames to become resident.
+# Three times that leaves room for the transport to be redrawing too.
+MIN_EPOCH_FRAMES: Final = 120
 FIX_PALETTE_BANK: Final = 1
 S_ROM_BYTES: Final = 131072
 
@@ -503,7 +508,19 @@ def _epoch_starts(
     for index, start in enumerate(starts):
         stop = starts[index + 1] if index + 1 < len(starts) else total
         filled.extend(range(start, stop, step))
-    return filled
+
+    # An epoch has to last long enough for the player to write the next
+    # one into the other half of CRAM, a slice at a time. Any boundary
+    # that arrives sooner leaves that half still holding the epoch
+    # before last, and the picture comes back a checkerboard of two
+    # scenes. The guard above spaces scene cuts from each other but says
+    # nothing about the boundaries subdivision adds between them, so the
+    # final list is what has to be thinned.
+    spaced: list[int] = []
+    for start in filled:
+        if not spaced or start - spaced[-1] >= MIN_EPOCH_FRAMES:
+            spaced.append(start)
+    return spaced
 
 
 def _epoch_samples(

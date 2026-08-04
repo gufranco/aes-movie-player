@@ -26,7 +26,7 @@ typedef struct {
 } debug_stats;
 
 void menu_init(void);
-void menu_debug(const debug_stats *stats);
+void menu_debug_row(const debug_stats *stats, uint16_t slot);
 void menu_debug_hide(void);
 void menu_draw(transport_state state, uint16_t speed, uint32_t frame, uint32_t total);
 void menu_hide(void);
