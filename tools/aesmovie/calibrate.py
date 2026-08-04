@@ -26,6 +26,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 
 from aesmovie import encode, frames, neocolor, quality
 
@@ -106,3 +107,68 @@ def measure_reference_rate(
     minutes = clip.shape[0] / float(frames.VBLANK_FPS) / quality.SECONDS_PER_MINUTE
     rate: float = result.stats.tile_count / minutes
     return rate
+
+
+def measure_anchors(
+    source: Path,
+    *,
+    count: int = DEFAULT_SAMPLE_COUNT,
+    seconds: float = DEFAULT_SAMPLE_SECONDS,
+    fit: frames.FitMode = "fill",
+    seed: int = 0,
+    start: float = 0.0,
+    duration: float | None = None,
+) -> tuple[float, dict[float, float]]:
+    """Measure this source's own cost curve, not just one point on it.
+
+    Returns the reference rate and a map from the ladder's averaged relative
+    cost to what this source actually costs there. One measurement fixes the
+    scale; the anchors either side fix the shape, which the ladder cannot
+    know because it varies with the content.
+
+    The clip is decoded once and encoded three times, so the extra accuracy
+    costs two encodes rather than two decodes.
+    """
+    source = Path(source)
+    info = frames.probe(source)
+    span_total = info.duration - start
+    if duration is not None:
+        span_total = min(span_total, duration)
+    windows = sample_windows(span_total, count=count, seconds=seconds)
+    clip = np.concatenate(
+        [
+            np.concatenate(
+                list(frames.stream(source, start=start + offset, duration=span, fit=fit))
+            )
+            for offset, span in windows
+        ]
+    )
+    minutes = clip.shape[0] / float(frames.VBLANK_FPS) / quality.SECONDS_PER_MINUTE
+
+    measured: dict[float, float] = {}
+    reference_rate = 0.0
+    for chroma in quality.ANCHOR_CHROMA:
+        tier = quality.nearest_by_chroma(chroma)
+        rate = _encode_rate(clip, tier, seed=seed) / minutes
+        measured[tier.relative_cost] = rate
+        if tier.name == quality.REFERENCE_TIER:
+            reference_rate = rate
+
+    return reference_rate, {rung: rate / reference_rate for rung, rate in measured.items()}
+
+
+def _encode_rate(clip: npt.NDArray[np.uint8], tier: quality.Tier, *, seed: int) -> float:
+    sample_tiles = encode.to_tiles(neocolor.rgb_to_color_index(clip[::4])).reshape(-1, 16, 16)
+    result = encode.encode_stream(
+        [clip],
+        encode.EncodeOptions(
+            collect_rendered=False,
+            chroma_weight=tier.chroma_weight,
+            frame_hold=tier.frame_hold,
+            tolerance=tier.tolerance,
+            seed=seed,
+        ),
+        sample_tiles=sample_tiles,
+        total_frames=clip.shape[0],
+    )
+    return float(result.stats.tile_count)

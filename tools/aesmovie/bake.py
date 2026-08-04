@@ -29,7 +29,17 @@ from typing import Any, Final
 import numpy as np
 import numpy.typing as npt
 
-from aesmovie import adpcmb, calibrate, encode, fixtiles, frames, neocolor, palettes, quality
+from aesmovie import (
+    adpcmb,
+    calibrate,
+    encode,
+    fixtiles,
+    frames,
+    neocolor,
+    palettes,
+    quality,
+    subtitles,
+)
 
 SECONDS_PER_MINUTE: Final = 60.0
 CROM_BANK_BYTES: Final = 128 << 20
@@ -162,6 +172,9 @@ _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 #define MOVIE_FPS_DEN {fps_den}u
 #define MOVIE_AUDIO_PAGE_NUM {audio_page_num}u
 #define MOVIE_AUDIO_PAGE_DEN {audio_page_den}u
+#define MOVIE_SUBTITLE_COUNT {subtitle_count}
+#define MOVIE_SUBTITLE_COLUMNS {subtitle_columns}
+#define MOVIE_SUBTITLE_LINES {subtitle_lines}
 
 #define FIX_PALETTE {fix_palette}
 {fix_defines}
@@ -170,6 +183,7 @@ extern const unsigned char movie_index[];
 extern const unsigned char movie_keyframes[];
 extern const unsigned char movie_palettes[];
 extern const unsigned char movie_epochs[];
+extern const unsigned char movie_subtitles[];
 extern const unsigned char movie_fix_palette[];
 
 #endif
@@ -315,6 +329,7 @@ def _write_sources(
         ("movie_palettes", "palettes"),
         ("movie_epochs", "epochs"),
         ("movie_fix_palette", "fixpal"),
+        ("movie_subtitles", "subtitles"),
     ):
         body += _ASM_ENTRY.format(symbol=symbol, path=outcome_paths[key].name)
     asm.write_text(body)
@@ -347,6 +362,13 @@ def _write_sources(
             fix_defines=_fix_defines(),
             audio_page_num=audio_pages.numerator,
             audio_page_den=audio_pages.denominator or 1,
+            subtitle_count=(
+                outcome_paths["subtitles"].stat().st_size // subtitles.RECORD_BYTES
+                if "subtitles" in outcome_paths
+                else 0
+            ),
+            subtitle_columns=subtitles.COLUMNS,
+            subtitle_lines=subtitles.MAX_LINES,
         )
     )
     return asm, header
@@ -470,6 +492,33 @@ def _write_preview(path: Path, rendered: np.ndarray) -> None:
 def _palette_blob(result: encode.EncodeResult) -> bytes:
     """Every epoch's CRAM words, back to back in playing order."""
     return b"".join(palette_set.cram_blob() for palette_set in result.palette_sets)
+
+
+def _subtitle_blob(request: BakeRequest) -> bytes:
+    """Cues from the sidecar beside the source, or nothing when there is none.
+
+    Timings are absolute in the file, so the baked window has to be shifted
+    to the front and anything outside it dropped: a cue at 20 minutes means
+    nothing to a cartridge holding minutes three to five.
+    """
+    sidecar = subtitles.sidecar_for(request.source)
+    if sidecar is None:
+        return b""
+    cues = [
+        subtitles.Cue(
+            start=cue.start - request.start,
+            end=min(cue.end, request.start + request.duration) - request.start,
+            lines=cue.lines,
+        )
+        for cue in subtitles.parse(sidecar.read_text(encoding="utf-8", errors="replace"))
+        if cue.end > request.start and cue.start < request.start + request.duration
+    ]
+    trimmed = [
+        subtitles.Cue(start=max(0.0, cue.start), end=cue.end, lines=cue.lines)
+        for cue in cues
+        if cue.end > 0.0
+    ]
+    return subtitles.encode(trimmed, fps=float(frames.VBLANK_FPS))
 
 
 def _epoch_blob(result: encode.EncodeResult) -> bytes:
@@ -617,6 +666,7 @@ def run(request: BakeRequest) -> BakeOutcome:
         "keyframes": (baked / "keyframes.bin", result.stream.keyframe_blob()),
         "palettes": (baked / "palettes.bin", _palette_blob(result)),
         "epochs": (baked / "epochs.bin", _epoch_blob(result)),
+        "subtitles": (baked / "subtitles.bin", _subtitle_blob(request)),
         "fix": (baked / "fix.s1", fixtiles.build_rom(pad_to=S_ROM_BYTES)),
         "fixpal": (
             baked / "fixpal.bin",
@@ -701,7 +751,7 @@ def _resolve_quality(args: argparse.Namespace) -> quality.Tier | None:
     if args.quality != "auto":
         return quality.tier_by_name(args.quality)
 
-    rate = calibrate.measure_reference_rate(
+    rate, anchors = calibrate.measure_anchors(
         args.source, fit=args.fit, seed=args.seed, start=args.start, duration=args.duration
     )
     print(
@@ -714,13 +764,14 @@ def _resolve_quality(args: argparse.Namespace) -> quality.Tier | None:
             has_audio=has_audio_stream(args.source),
             reference_rate=rate,
             vblank_fps=float(frames.VBLANK_FPS),
+            anchors=anchors,
         ),
         file=sys.stderr,
     )
-    shortfall = quality.shortfall_message(minutes, rate)
+    shortfall = quality.shortfall_message(minutes, rate, anchors)
     if shortfall is not None:
         raise SystemExit(shortfall)
-    chosen = quality.select(minutes, rate)
+    chosen = quality.select(minutes, rate, anchors)
     assert chosen is not None
     return chosen.tier
 

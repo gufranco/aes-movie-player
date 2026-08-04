@@ -268,3 +268,28 @@ void menu_debug_row(const debug_stats *stats, uint16_t slot)
     }
 }
 
+/* Subtitles sit two rows above the transport panel so the two never fight
+ * for the same cells, and far enough inside the raster that a television
+ * losing its outermost row still shows the whole line. */
+#define SUBTITLE_TOP_ROW  (MENU_TOP_ROW - 3)
+
+void menu_subtitle_show(const unsigned char *rows)
+{
+    for (uint16_t line = 0; line < MOVIE_SUBTITLE_LINES; line++) {
+        const unsigned char *cells = rows + line * MOVIE_SUBTITLE_COLUMNS;
+
+        for (uint16_t col = 0; col < MENU_COLS; col++) {
+            fix_poke(col, (uint16_t)(SUBTITLE_TOP_ROW + line), cells[col]);
+        }
+    }
+}
+
+void menu_subtitle_hide(void)
+{
+    for (uint16_t line = 0; line < MOVIE_SUBTITLE_LINES; line++) {
+        for (uint16_t col = 0; col < MENU_COLS; col++) {
+            fix_poke(col, (uint16_t)(SUBTITLE_TOP_ROW + line), FIX_TILE_BLANK);
+        }
+    }
+}
+

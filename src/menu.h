@@ -31,4 +31,7 @@ void menu_debug_hide(void);
 void menu_draw(transport_state state, uint16_t speed, uint32_t frame, uint32_t total);
 void menu_hide(void);
 
+void menu_subtitle_show(const unsigned char *rows);
+void menu_subtitle_hide(void);
+
 #endif

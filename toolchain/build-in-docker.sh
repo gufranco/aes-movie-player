@@ -7,6 +7,7 @@ if [[ "$(uname)" != "Linux" ]]; then
         exit 1
     fi
     exec docker run --rm --platform linux/amd64 \
+        -e "BUILD=${BUILD:-build}" \
         -v "$PWD:/work" -w /work ubuntu:24.04 bash -c '
         set -e
         export DEBIAN_FRONTEND=noninteractive

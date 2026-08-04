@@ -1,10 +1,13 @@
 build/
+build-*/
+!build-*.log
 __pycache__/
 *.pyc
 .venv/
 *.neo
 *.zip
 assets/clip/
+assets/testsuite/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/

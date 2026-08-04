@@ -202,7 +202,7 @@ class TestDecodeLimits:
         monkeypatch.setattr(frames.shutil, "which", lambda _: None)
 
         with pytest.raises(RuntimeError, match="ffprobe"):
-            frames._require_tool("ffprobe")
+            frames.require_tool("ffprobe")
 
 
 class TestDenoise:

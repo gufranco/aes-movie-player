@@ -81,38 +81,54 @@ class Tier:
 
 
 LADDER: Final = (
-    Tier("q01", 1.0, 1, 0.0005, 0.0, 2.283, "every frame, colour at 100%", candidates=0),
-    Tier("q02", 0.89, 1, 0.0006, 0.0, 2.071, "every frame, colour at 89%"),
-    Tier("q03", 0.79, 1, 0.0007, 0.0, 1.88, "every frame, colour at 79%"),
-    Tier("q04", 0.7, 1, 0.0008, 0.0, 1.705, "every frame, colour at 70%"),
-    Tier("q05", 0.62, 1, 0.0009, 0.0, 1.547, "every frame, colour at 62%"),
-    Tier("q06", 0.54, 1, 0.001, 0.0, 1.404, "every frame, colour at 54%"),
-    Tier("q07", 0.48, 1, 0.0011, 0.0, 1.274, "every frame, colour at 48%"),
-    Tier("q08", 0.42, 1, 0.0015, 0.0, 1.156, "every frame, colour at 42%"),
-    Tier("q09", 0.37, 1, 0.0018, 0.0, 1.049, "every frame, colour at 37%"),
-    Tier("q10", 0.31, 1, 0.0024, 0.0, 0.952, "every frame, colour at 31%"),
-    Tier("q11", 0.24, 1, 0.0032, 0.0, 0.863, "every frame, colour at 24%"),
-    Tier("q12", 0.2, 1, 0.0044, 0.0, 0.783, "every frame, colour at 20%"),
-    Tier("q13", 0.16, 1, 0.0061, 0.0, 0.711, "every frame, colour at 16%"),
-    Tier("q14", 0.12, 1, 0.008, 0.0, 0.645, "every frame, colour at 12%"),
-    Tier("q15", 0.12, 3, 0.008, 0.0, 0.602, "20 fps, colour at 12%"),
-    Tier("q16", 0.12, 4, 0.008, 0.0, 0.549, "15 fps, colour at 12%"),
-    Tier("q17", 0.12, 5, 0.008, 0.0, 0.507, "12 fps, colour at 12%"),
-    Tier("q18", 0.12, 6, 0.008, 0.0, 0.47, "10 fps, colour at 12%"),
+    Tier("q01", 1.0, 1, 0.000500, 0.0, 1.529, "every frame, colour at 100%", candidates=0),
+    Tier("q02", 0.94, 1, 0.000558, 0.0, 1.497, "every frame, colour at 94%"),
+    Tier("q03", 0.89, 1, 0.000623, 0.0, 1.459, "every frame, colour at 89%"),
+    Tier("q04", 0.84, 1, 0.000695, 0.0, 1.415, "every frame, colour at 84%"),
+    Tier("q05", 0.79, 1, 0.000775, 0.0, 1.376, "every frame, colour at 79%"),
+    Tier("q06", 0.74, 1, 0.000865, 0.0, 1.336, "every frame, colour at 74%"),
+    Tier("q07", 0.7, 1, 0.000965, 0.0, 1.300, "every frame, colour at 70%"),
+    Tier("q08", 0.66, 1, 0.001077, 0.0, 1.268, "every frame, colour at 66%"),
+    Tier("q09", 0.62, 1, 0.001201, 0.0, 1.237, "every frame, colour at 62%"),
+    Tier("q10", 0.58, 1, 0.001341, 0.0, 1.207, "every frame, colour at 58%"),
+    Tier("q11", 0.54, 1, 0.001496, 0.0, 1.178, "every frame, colour at 54%"),
+    Tier("q12", 0.51, 1, 0.001669, 0.0, 1.149, "every frame, colour at 51%"),
+    Tier("q13", 0.48, 1, 0.001862, 0.0, 1.120, "every frame, colour at 48%"),
+    Tier("q14", 0.45, 1, 0.002078, 0.0, 1.090, "every frame, colour at 45%"),
+    Tier("q15", 0.42, 1, 0.002319, 0.0, 1.060, "every frame, colour at 42%"),
+    Tier("q16", 0.39, 1, 0.002587, 0.0, 1.030, "every frame, colour at 39%"),
+    Tier("q17", 0.37, 1, 0.002887, 0.0, 1.000, "every frame, colour at 37%"),
+    Tier("q18", 0.34, 1, 0.003222, 0.0, 0.969, "every frame, colour at 34%"),
+    Tier("q19", 0.31, 1, 0.003595, 0.0, 0.938, "every frame, colour at 31%"),
+    Tier("q20", 0.28, 1, 0.004011, 0.0, 0.907, "every frame, colour at 28%"),
+    Tier("q21", 0.26, 1, 0.004475, 0.0, 0.876, "every frame, colour at 26%"),
+    Tier("q22", 0.24, 1, 0.004994, 0.0, 0.845, "every frame, colour at 24%"),
+    Tier("q23", 0.22, 1, 0.005572, 0.0, 0.813, "every frame, colour at 22%"),
+    Tier("q24", 0.2, 1, 0.006218, 0.0, 0.780, "every frame, colour at 20%"),
+    Tier("q25", 0.18, 1, 0.006938, 0.0, 0.747, "every frame, colour at 18%"),
+    Tier("q26", 0.16, 1, 0.007741, 0.0, 0.713, "every frame, colour at 16%"),
+    Tier("q27", 0.14, 1, 0.008638, 0.0, 0.680, "every frame, colour at 14%"),
+    Tier("q28", 0.12, 1, 0.009638, 0.0, 0.646, "every frame, colour at 12%"),
+    Tier("q29", 0.1, 1, 0.010754, 0.0, 0.613, "every frame, colour at 10%"),
+    Tier("q30", 0.08, 1, 0.012000, 0.0, 0.581, "every frame, colour at 8%"),
+    Tier("q31", 0.08, 2, 0.012000, 0.0, 0.525, "30 fps, colour at 8%"),
+    Tier("q32", 0.08, 3, 0.012000, 0.0, 0.437, "20 fps, colour at 8%"),
+    Tier("q33", 0.08, 4, 0.012000, 0.0, 0.357, "15 fps, colour at 8%"),
+    Tier("q34", 0.08, 5, 0.012000, 0.0, 0.308, "12 fps, colour at 8%"),
+    Tier("q35", 0.08, 6, 0.012000, 0.0, 0.264, "10 fps, colour at 8%"),
 )
-
-REFERENCE_TIER: Final = "q09"
+REFERENCE_TIER: Final = "q17"
 
 
 ALIASES: Final = {
     "reference": "q01",
-    "archival": "q02",
-    "high": "q06",
-    "standard": "q09",
-    "extended": "q12",
-    "long": "q14",
-    "maximum": "q16",
-    "extreme": "q18",
+    "archival": "q03",
+    "high": "q11",
+    "standard": "q17",
+    "extended": "q23",
+    "long": "q28",
+    "maximum": "q33",
+    "extreme": "q35",
 }
 
 
@@ -136,14 +152,27 @@ def effective_fps(tier: Tier, vblank_fps: float) -> float:
     return vblank_fps / tier.frame_hold
 
 
-def tile_rate_for(tier: Tier, reference_rate: float) -> float:
-    """Tiles per minute this tier costs, given the measured reference."""
-    return reference_rate * tier.relative_cost
+def tile_rate_for(
+    tier: Tier, reference_rate: float, anchors: dict[float, float] | None = None
+) -> float:
+    """Tiles per minute this tier costs, given the measured reference.
+
+    The ladder's cost is averaged over several sources, and the shape of
+    that curve is a property of the content: measured across four sources
+    the same setting varied by up to 2x at the extremes. When the source's
+    own anchors are known, the averaged cost is bent onto them.
+    """
+    relative = tier.relative_cost
+    if anchors:
+        relative = rescale(relative, anchors=anchors)
+    return reference_rate * relative
 
 
-def max_minutes(tier: Tier, reference_rate: float) -> float:
+def max_minutes(
+    tier: Tier, reference_rate: float, anchors: dict[float, float] | None = None
+) -> float:
     """Longest movie this tier fits, before any safety margin."""
-    rate = tile_rate_for(tier, reference_rate)
+    rate = tile_rate_for(tier, reference_rate, anchors)
     if rate <= 0.0:
         return float("inf")
     return CROM_TILES / rate
@@ -308,6 +337,7 @@ def format_plan(
     has_audio: bool,
     reference_rate: float,
     vblank_fps: float,
+    anchors: dict[float, float] | None = None,
 ) -> str:
     """A full account of what this source can become, and what it costs.
 
@@ -317,7 +347,7 @@ def format_plan(
     trimming the source stays a decision the person makes with the
     numbers in front of them.
     """
-    fits = survey(minutes, reference_rate)
+    fits = survey(minutes, reference_rate, anchors)
     chosen = select(minutes, reference_rate)
     audio = "audio present" if has_audio else "no audio"
     lines = [
@@ -367,30 +397,77 @@ def format_plan(
     return "\n".join(lines)
 
 
-def survey(minutes: float, reference_rate: float) -> list[Fit]:
+def survey(
+    minutes: float, reference_rate: float, anchors: dict[float, float] | None = None
+) -> list[Fit]:
     """Every tier measured against one runtime, best quality first."""
-    return [Fit(tier, minutes, max_minutes(tier, reference_rate)) for tier in LADDER]
+    return [Fit(tier, minutes, max_minutes(tier, reference_rate, anchors)) for tier in LADDER]
 
 
-def shortfall_message(minutes: float, reference_rate: float) -> str | None:
+def shortfall_message(
+    minutes: float, reference_rate: float, anchors: dict[float, float] | None = None
+) -> str | None:
     """Why a source cannot be baked at all, or None when some tier fits.
 
     Kept apart from the command line so the decision, and the number the
     reader is asked to act on, can be checked without a source long
     enough to actually overrun a cartridge.
     """
-    if select(minutes, reference_rate) is not None:
+    if select(minutes, reference_rate, anchors) is not None:
         return None
-    cheapest = survey(minutes, reference_rate)[-1]
+    cheapest = survey(minutes, reference_rate, anchors)[-1]
     return (
         f"this source does not fit at any quality tier; trim "
         f"{clock(cheapest.trim_minutes)} and bake again"
     )
 
 
-def select(minutes: float, reference_rate: float) -> Fit | None:
+def select(
+    minutes: float, reference_rate: float, anchors: dict[float, float] | None = None
+) -> Fit | None:
     """The best tier that fits, or None when even the cheapest overruns."""
-    for fit in survey(minutes, reference_rate):
+    for fit in survey(minutes, reference_rate, anchors):
         if fit.fits:
             return fit
     return None
+
+
+ANCHOR_CHROMA: Final = (1.0, 0.37, 0.08)
+"""Where the source's own cost curve is measured.
+
+One anchor is not enough. Measured across four sources, the cost of a
+setting relative to the reference agreed by construction at the reference
+and diverged by up to 2x at the extremes: at colour 8% the cheapest source
+came in at 0.378 and the dearest at 0.756. A ladder averaged over sources
+therefore mispredicts any single one, and it does so worst exactly where
+the rungs are cheapest. Three anchors pin both ends and the middle.
+"""
+
+
+def rescale(relative_cost: float, *, anchors: dict[float, float]) -> float:
+    """Bend the ladder's averaged cost onto the curve this source actually has.
+
+    The anchors map a rung's averaged relative cost to what the source
+    measured there. Rungs between two anchors are interpolated in log space,
+    which keeps the ordering: a rung cheaper on the ladder stays cheaper
+    after correction.
+    """
+    known = sorted(anchors.items())
+    if relative_cost <= known[0][0]:
+        low, high = known[0], known[1]
+    elif relative_cost >= known[-1][0]:
+        low, high = known[-2], known[-1]
+    else:
+        index = next(i for i, (rung, _) in enumerate(known) if rung > relative_cost)
+        low, high = known[index - 1], known[index]
+
+    span = math.log(high[0]) - math.log(low[0])
+    if abs(span) < 1e-12:
+        return low[1]
+    ratio = (math.log(relative_cost) - math.log(low[0])) / span
+    return math.exp(math.log(low[1]) + ratio * (math.log(high[1]) - math.log(low[1])))
+
+
+def nearest_by_chroma(chroma_weight: float) -> Tier:
+    """The rung whose colour weight is closest to a wanted one."""
+    return min(LADDER, key=lambda tier: abs(tier.chroma_weight - chroma_weight))

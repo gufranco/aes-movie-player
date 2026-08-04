@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
         f" {info.duration:.0f}s, at the '{quality.REFERENCE_TIER}' tier...",
         file=sys.stderr,
     )
-    rate = calibrate.measure_reference_rate(
+    rate, anchors = calibrate.measure_anchors(
         args.source,
         count=args.samples,
         seconds=args.sample_seconds,
@@ -58,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
             has_audio=bake.has_audio_stream(args.source),
             reference_rate=rate,
             vblank_fps=float(frames.VBLANK_FPS),
+            anchors=anchors,
         )
     )
     return 0

@@ -239,6 +239,46 @@ static void apply_frame(uint32_t frame)
     }
 }
 
+/* Cues are fixed width and sorted, so finding the one covering a frame is
+ * an index calculation rather than a walk. Records carry a start frame, an
+ * end frame, and the glyph rows already laid out and centred by the baker,
+ * because none of that fits in a vblank. */
+#define SUBTITLE_RECORD_BYTES (8u + MOVIE_SUBTITLE_COLUMNS * MOVIE_SUBTITLE_LINES)
+
+static uint32_t subtitle_word(uint16_t index, uint16_t offset)
+{
+    const unsigned char *record = movie_subtitles + (uint32_t)index * SUBTITLE_RECORD_BYTES;
+
+    return ((uint32_t)record[offset] << 24) | ((uint32_t)record[offset + 1] << 16) |
+           ((uint32_t)record[offset + 2] << 8) | (uint32_t)record[offset + 3];
+}
+
+/* Returns MOVIE_SUBTITLE_COUNT when no cue covers the frame, which the
+ * caller reads as "show nothing" without needing a second sentinel. */
+static uint16_t subtitle_at(uint32_t frame)
+{
+    uint16_t low = 0;
+    uint16_t high = MOVIE_SUBTITLE_COUNT;
+
+    while (low < high) {
+        uint16_t mid = (uint16_t)((low + high) >> 1);
+
+        if (subtitle_word(mid, 0) > frame) {
+            high = mid;
+        } else {
+            low = (uint16_t)(mid + 1);
+        }
+    }
+    if (low == 0) {
+        return MOVIE_SUBTITLE_COUNT;
+    }
+    low--;
+    if (frame >= subtitle_word(low, 4)) {
+        return MOVIE_SUBTITLE_COUNT;
+    }
+    return low;
+}
+
 static uint32_t keyframe_at_or_before(uint32_t frame)
 {
     const uint32_t *table = (const uint32_t *)movie_keyframes;
@@ -290,6 +330,8 @@ int main(void)
     uint8_t previous_start = (uint8_t)(~REG_STATUS_B & STATUS_START);
     debug_stats diag = {0};
     uint8_t debug_visible = 0;
+    uint8_t subtitles_on = MOVIE_SUBTITLE_COUNT > 0;
+    uint16_t resident_cue = MOVIE_SUBTITLE_COUNT;
     uint16_t overlay_tick = 0;
     uint8_t overlay_visible = 0;
 
@@ -332,6 +374,13 @@ int main(void)
             } else {
                 audio_seek(frame);
             }
+        }
+        if ((pressed & PAD_DOWN) && MOVIE_SUBTITLE_COUNT > 0) {
+            subtitles_on = (uint8_t)!subtitles_on;
+            if (!subtitles_on) {
+                menu_subtitle_hide();
+            }
+            resident_cue = MOVIE_SUBTITLE_COUNT;
         }
         if (pressed & PAD_UP) {
             debug_visible = (uint8_t)!debug_visible;
@@ -433,6 +482,19 @@ int main(void)
         } else if (overlay_visible) {
             menu_hide();
             overlay_visible = 0;
+        }
+
+        if (subtitles_on) {
+            uint16_t cue = subtitle_at(frame);
+
+            if (cue != resident_cue) {
+                resident_cue = cue;
+                if (cue < MOVIE_SUBTITLE_COUNT) {
+                    menu_subtitle_show(movie_subtitles + (uint32_t)cue * SUBTITLE_RECORD_BYTES + 8u);
+                } else {
+                    menu_subtitle_hide();
+                }
+            }
         }
 
         if (frame_updates > diag.peak_updates) {

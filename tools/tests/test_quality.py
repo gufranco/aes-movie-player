@@ -6,6 +6,8 @@ a tier is checked directly rather than through a bake.
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
 
 from aesmovie import quality
@@ -316,3 +318,47 @@ class TestAudioGrade:
 
     def test_a_short_movie_is_graded_top(self):
         assert quality.audio_grade(quality.audio_hz_for(2.0)) == 1
+
+
+class TestPerSourceCurve:
+    """The shape of the cost curve is a property of the content, not the ladder.
+
+    Measured across four sources, a setting's cost relative to the reference
+    varied by up to 2x at the extremes, so a ladder averaged over them
+    mispredicts any single source. Anchoring the curve at both ends of the
+    source itself removes that error.
+    """
+
+    def test_the_reference_anchor_is_left_alone(self):
+        corrected = quality.rescale(1.0, anchors={2.0: 2.0, 1.0: 1.0, 0.3: 0.3})
+
+        assert corrected == pytest.approx(1.0)
+
+    def test_a_cheaper_source_pulls_the_low_end_down(self):
+        cheap = quality.rescale(0.3, anchors={2.0: 2.0, 1.0: 1.0, 0.3: 0.2})
+
+        assert cheap == pytest.approx(0.2)
+
+    def test_a_dearer_source_pushes_the_high_end_up(self):
+        dear = quality.rescale(2.0, anchors={2.0: 2.5, 1.0: 1.0, 0.3: 0.3})
+
+        assert dear == pytest.approx(2.5)
+
+    def test_a_rung_between_anchors_is_interpolated(self):
+        between = quality.rescale(0.6, anchors={2.0: 2.0, 1.0: 1.0, 0.3: 0.2})
+
+        assert 0.2 < between < 1.0
+
+    def test_anchors_that_agree_change_nothing(self):
+        for rung in (2.0, 1.5, 1.0, 0.5, 0.3):
+            assert quality.rescale(rung, anchors={2.0: 2.0, 1.0: 1.0, 0.3: 0.3}) == pytest.approx(
+                rung
+            )
+
+    def test_the_correction_stays_ordered(self):
+        anchors = {2.0: 2.4, 1.0: 1.0, 0.3: 0.22}
+        rungs = [2.0, 1.6, 1.2, 1.0, 0.8, 0.5, 0.3]
+
+        corrected = [quality.rescale(rung, anchors=anchors) for rung in rungs]
+
+        assert all(a > b for a, b in itertools.pairwise(corrected))

@@ -93,7 +93,7 @@ def frame_count(*, seconds: float) -> int:
     return int(seconds * VBLANK_FPS)
 
 
-def _require_tool(name: str) -> str:
+def require_tool(name: str) -> str:
     path = shutil.which(name)
     if path is None:
         msg = f"{name} not found on PATH"
@@ -109,7 +109,7 @@ def probe(path: Path) -> VideoInfo:
         raise FileNotFoundError(msg)
     result = subprocess.run(
         [
-            _require_tool("ffprobe"),
+            require_tool("ffprobe"),
             "-v",
             "error",
             "-select_streams",
@@ -167,7 +167,7 @@ def _run_filter(path: Path, filter_spec: str, *, start: float, duration: float) 
     """Run an analysis filter and hand back what it wrote to stderr."""
     result = subprocess.run(
         [
-            _require_tool("ffmpeg"),
+            require_tool("ffmpeg"),
             "-hide_banner",
             "-ss",
             f"{start:.6f}",
@@ -344,7 +344,7 @@ def decode(
     wanted = frame_count(seconds=duration)
     result = subprocess.run(
         [
-            _require_tool("ffmpeg"),
+            require_tool("ffmpeg"),
             "-v",
             "error",
             "-ss",
@@ -409,7 +409,7 @@ def _decode_process(
     geometry = plan_geometry(width, height, target_width, target_height, fit=fit)
     return subprocess.Popen(
         [
-            _require_tool("ffmpeg"),
+            require_tool("ffmpeg"),
             "-v",
             "error",
             "-ss",
