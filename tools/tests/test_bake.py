@@ -12,6 +12,7 @@ import pytest
 
 from aesmovie import adpcmb, bake, content, quality, stream
 from aesmovie import frames as frames_mod
+from aesmovie import subtitles as subtitles_mod
 
 _spec = importlib.util.spec_from_file_location(
     "verify_capture", Path(__file__).resolve().parents[1] / "scripts" / "verify_capture.py"
@@ -81,6 +82,95 @@ def baked(synthetic_clip, tmp_path_factory):
             sample_stride=1,
         )
     )
+
+
+class TestSourceDefaults:
+    def test_the_duration_defaults_to_the_rest_of_the_source(self, synthetic_clip):
+        args = bake._parse_args(["--source", str(synthetic_clip)])
+
+        resolved = bake._resolve_duration(args)
+
+        assert resolved == pytest.approx(frames_mod.probe(synthetic_clip).duration, abs=0.05)
+
+    def test_an_explicit_duration_still_wins(self, synthetic_clip):
+        args = bake._parse_args(["--source", str(synthetic_clip), "--duration", "0.25"])
+
+        assert bake._resolve_duration(args) == pytest.approx(0.25)
+
+    def test_a_start_offset_shortens_the_default_duration(self, synthetic_clip):
+        args = bake._parse_args(["--source", str(synthetic_clip), "--start", "0.4"])
+
+        full = frames_mod.probe(synthetic_clip).duration
+
+        assert bake._resolve_duration(args) == pytest.approx(full - 0.4, abs=0.05)
+
+
+class TestSubtitleSource:
+    def _cue(self, path):
+        path.write_text("1\n00:00:00,000 --> 00:00:01,000\nHELLO\n", encoding="utf-8")
+
+    def test_an_explicit_subtitle_file_is_used(self, tmp_path):
+        captions = tmp_path / "captions.srt"
+        self._cue(captions)
+        request = bake.BakeRequest(
+            source=tmp_path / "movie.mkv",
+            start=0.0,
+            duration=10.0,
+            build_dir=tmp_path,
+            subtitles=captions,
+        )
+
+        blob = bake._subtitle_blob(request)
+
+        assert len(blob) == subtitles_mod.RECORD_BYTES
+
+    def test_it_falls_back_to_the_sidecar_beside_the_source(self, tmp_path):
+        source = tmp_path / "movie.mkv"
+        source.write_bytes(b"")
+        self._cue(tmp_path / "movie.srt")
+        request = bake.BakeRequest(source=source, start=0.0, duration=10.0, build_dir=tmp_path)
+
+        blob = bake._subtitle_blob(request)
+
+        assert len(blob) == subtitles_mod.RECORD_BYTES
+
+    def test_an_explicit_file_overrides_the_sidecar(self, tmp_path):
+        source = tmp_path / "movie.mkv"
+        source.write_bytes(b"")
+        (tmp_path / "movie.srt").write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\nSIDECAR\n", encoding="utf-8"
+        )
+        chosen = tmp_path / "chosen.srt"
+        chosen.write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\nCHOSEN\n\n2\n00:00:02,000 --> 00:00:03,000\nAGAIN\n",
+            encoding="utf-8",
+        )
+        request = bake.BakeRequest(
+            source=source, start=0.0, duration=10.0, build_dir=tmp_path, subtitles=chosen
+        )
+
+        blob = bake._subtitle_blob(request)
+
+        assert len(blob) == 2 * subtitles_mod.RECORD_BYTES
+
+    def test_no_subtitles_anywhere_is_an_empty_blob(self, tmp_path):
+        request = bake.BakeRequest(
+            source=tmp_path / "movie.mkv", start=0.0, duration=10.0, build_dir=tmp_path
+        )
+
+        assert bake._subtitle_blob(request) == b""
+
+    def test_a_named_subtitle_file_that_does_not_exist_is_an_error(self, tmp_path):
+        request = bake.BakeRequest(
+            source=tmp_path / "movie.mkv",
+            start=0.0,
+            duration=10.0,
+            build_dir=tmp_path,
+            subtitles=tmp_path / "missing.srt",
+        )
+
+        with pytest.raises(FileNotFoundError):
+            bake._subtitle_blob(request)
 
 
 class TestArtifacts:

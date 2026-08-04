@@ -256,6 +256,7 @@ class BakeRequest:
     quality: str | None = None
     tile_budget: int = 0
     audio_rate_hz: float | None = None
+    subtitles: Path | None = None
     """Sample rate for the voice ROM, or None to take the highest that fits.
 
     There is no sensible constant here. The ceiling is the chip's, the floor
@@ -543,9 +544,16 @@ def _subtitle_blob(request: BakeRequest) -> bytes:
     to the front and anything outside it dropped: a cue at 20 minutes means
     nothing to a cartridge holding minutes three to five.
     """
-    sidecar = subtitles.sidecar_for(request.source)
-    if sidecar is None:
-        return b""
+    sidecar: Path
+    if request.subtitles is not None:
+        sidecar = Path(request.subtitles)
+        if not sidecar.is_file():
+            raise FileNotFoundError(f"subtitle file not found: {sidecar}")
+    else:
+        beside = subtitles.sidecar_for(request.source)
+        if beside is None:
+            return b""
+        sidecar = beside
     cues = [
         subtitles.Cue(
             start=cue.start - request.start,
@@ -785,7 +793,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--quality", default=None)
     parser.add_argument("--audio-rate", type=float, default=None)
     parser.add_argument("--start", type=float, default=0.0)
-    parser.add_argument("--duration", type=float, required=True)
+    parser.add_argument("--duration", type=float, default=None)
+    parser.add_argument("--subtitles", type=Path, default=None)
     parser.add_argument("--build-dir", type=Path, default=Path("build"))
     parser.add_argument("--fit", choices=("fill", "letterbox"), default="fill")
     parser.add_argument("--denoise", type=float, default=None)
@@ -809,6 +818,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--preview", type=Path, default=None)
     parser.add_argument("--report-json", type=Path, default=None)
     return parser.parse_args(argv)
+
+
+def _resolve_duration(args: argparse.Namespace) -> float:
+    if args.duration is not None:
+        return float(args.duration)
+    return max(0.0, frames.probe(args.source).duration - float(args.start))
 
 
 def _resolve_quality(args: argparse.Namespace) -> quality.Tier | None:
@@ -891,6 +906,7 @@ def _resolve_frame_hold(args: argparse.Namespace, tier: quality.Tier | None) -> 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    args.duration = _resolve_duration(args)
     tier = _resolve_quality(args)
     profile = content.measure(args.source, duration=_PROFILE_SECONDS)
     scene_cut_floor = (
@@ -926,6 +942,7 @@ def main(argv: list[str] | None = None) -> int:
             start=args.start,
             duration=args.duration,
             build_dir=args.build_dir,
+            subtitles=args.subtitles,
             fit=args.fit,
             denoise=_pick(args.denoise, tier.denoise if tier else None, 0.0),
             frame_hold=frame_hold,
