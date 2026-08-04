@@ -113,32 +113,54 @@ Source
   9:56 runtime, 1280x720, 24.00 fps, audio present
 
 Calibration
-  measured 197,423 tiles per minute at 'standard'
+  measured 102,271 tiles per minute at 'q09'
 
 Quality ladder for this source
-  tier      picture                                  fps     holds          verdict
-  archival  every frame, full colour precision      59.2      3:10     over by 7:01
-  high      every frame, slightly cheaper colour    59.2      3:30     over by 6:42
-  standard  every frame, cheaper colour             59.2      5:19     over by 5:03
-  extended  20 fps, cheaper colour                  19.7      7:45     over by 2:49
-  long      15 fps, mild denoise                    14.8     11:24  fits, 0:33 spare
-  maximum   12 fps, visible softening               11.8     15:51  fits, 4:39 spare
-  extreme   10 fps, heavy softening                  9.9     22:19 fits, 10:36 spare
+  tier      picture                                  fps     holds               verdict
+  ------------------------------------------------------------------------------------
+  q01       every frame, colour at 100%             59.2      4:29          over by 5:49
+  q02       every frame, colour at 89%              59.2      4:57          over by 5:24
+  q03       every frame, colour at 79%              59.2      5:27          over by 4:56
+  q04       every frame, colour at 70%              59.2      6:01          over by 4:25
+  q05       every frame, colour at 62%              59.2      6:38          over by 3:51
+  q06       every frame, colour at 54%              59.2      7:18          over by 3:14
+  q07       every frame, colour at 48%              59.2      8:03          over by 2:33
+  q08       every frame, colour at 42%              59.2      8:52          over by 1:47
+  q09       every frame, colour at 37%              59.2      9:46          over by 0:57
+  q10       every frame, colour at 31%              59.2     10:46          over by 0:02
+  q11       every frame, colour at 24%              59.2     11:53      fits, 0:59 spare
+  q12       every frame, colour at 20%              59.2     13:06      fits, 2:06 spare
+  q13       every frame, colour at 16%              59.2     14:25      fits, 3:20 spare
+  q14       every frame, colour at 12%              59.2     15:54      fits, 4:41 spare
+  q15       20 fps, colour at 12%                   19.7     17:02      fits, 5:44 spare
+  q16       15 fps, colour at 12%                   14.8     18:41      fits, 7:14 spare
+  q17       12 fps, colour at 12%                   11.8     20:13      fits, 8:40 spare
+  q18       10 fps, colour at 12%                    9.9     21:49     fits, 10:08 spare
 
-Selected: long
-  holds 11:24, uses 9:56, 0:33 spare
+Selected: q11
+  every frame, colour at 24%
+  chroma weight 0.24, frame hold 1, tolerance 0.0032, denoise 0.0
+  holds 11:53, uses 9:56, 0:59 spare
 
-To reach 'extended' instead (20 fps, cheaper colour):
-  Trim 2:49, bringing the source to 7:07 or shorter.
+To reach 'q10' instead (every frame, colour at 31%):
+  Trim 0:02, bringing the source to 9:54 or shorter.
 
 Cartridge budget at this tier
-  C-ROM    111.6 MiB of 128.0 MiB     87%   913,858 tiles
-  audio      6.3 MiB of 16.0 MiB      39%   at 22.1 kHz
+  C-ROM    107.1 MiB of 128.0 MiB     84%   877,391 tiles
+  audio     15.8 MiB of 16.0 MiB     99%   at 55.6 kHz, grade 1 of 18
 ```
 
 Every tier is listed whether it fits or not, with the exact overshoot, so
 trimming the source stays a decision made with the numbers in view.
 Calibration takes under a minute where a bake takes hours.
+
+The eighteen rungs are not an arbitrary subdivision. Each one was measured,
+and the ladder keeps only the settings that were not beaten on both axes at
+once: a rung that costs more than its neighbour and looks no better does
+not appear. That is why colour falls in uneven steps and why frame rate
+only starts dropping at `q15`, once cheapening colour further has stopped
+buying anything. An earlier hand-picked ladder had a rung that was strictly
+worse than the one below it, which is the failure this ordering removes.
 
 The levers, in order of how much they cost perceptually:
 
