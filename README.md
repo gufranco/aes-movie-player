@@ -489,6 +489,60 @@ equivalent lever is the distance metric every stage already shares. Weighting
 it once moves palette fitting, tile assignment, and redraw decisions onto a
 luma-first metric together.
 
+### One ladder cannot price every film
+
+The rungs are priced by a single table of relative costs, and measurement says
+that table cannot be right for everything. What a colour reduction saves
+depends on what is on screen, and it varies enough to swamp the ladder.
+
+Four rungs, baked on the animated reference film and on a grainy live-action
+broadcast sequence, each cost expressed against `q01` on the same clip:
+
+| Rung | Animation | Live action | What the ladder says |
+|:-----|----------:|------------:|---------------------:|
+| `q01` | 1.000 | 1.000 | 1.000 |
+| `q09` | 0.620 | 0.895 | 0.809 |
+| `q17` | 0.426 | 0.752 | 0.654 |
+| `q25` | 0.297 | 0.557 | 0.489 |
+
+The ladder sits between the two, which means it is wrong in both directions at
+once. On animation it charges 53% more for `q17` than the rung actually costs,
+so the plan promises less runtime than the cartridge has and picks a lower rung
+than it needs to. On live action it charges 13% less than the rung costs, so
+the plan promises runtime that is not there.
+
+The reason is visible in the mechanism. Cheaper rungs save by letting more
+tiles quantise alike, and film grain perturbs almost every tile whatever the
+palette precision, so there is far less to collapse. The saving is a property
+of the content, not of the setting.
+
+Two things follow. `--quality auto` says this about itself now, in the plan it
+prints, rather than presenting a number it cannot support. And a bake that
+overruns fails instead of shipping a cartridge that silently stops tracking the
+source, so the optimistic direction costs a wasted bake rather than a bad cart.
+
+The measured path has none of this problem. `--quality search` bakes from `q01`
+down and takes the first rung that fits, so it never consults the table at all.
+
+### What live action costs
+
+The same four clips at `q17`, as tiles per minute and as the runtime a full
+128 MiB C-ROM would hold:
+
+| Clip | Tiles per minute | Fits |
+|:-----|-----------------:|-----:|
+| Big Buck Bunny, animation | 56,622 | 18.5 min |
+| blue_sky, live action | 287,279 | 3.7 min |
+| mobcal, live action | 409,600 | 2.6 min |
+| parkrun, live action | 616,623 | 1.7 min |
+
+Every runtime figure elsewhere in this document comes from the animated
+reference film, and the table above is the honest range around it. Flat-shaded
+animation is the best case for a tile dictionary by a wide margin: an hour of
+it is plausible, and an hour of grainy live action is not close. A feature shot
+on film will want a rung far down the ladder, and `search` is the way to find
+which one.
+
 ### The ladder is a frontier, and now it is checked
 
 The claim above, that no rung costs as much as another while looking no

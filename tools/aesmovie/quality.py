@@ -300,6 +300,27 @@ def _ladder_table(fits: list[Fit], vblank_fps: float) -> list[str]:
     return lines
 
 
+def _estimate_caveat() -> list[str]:
+    """Say plainly how far this choice can be wrong, and what is not a guess.
+
+    The rungs are priced by one ladder of relative costs, and measurement
+    says no single ladder can be right: how much a colour reduction saves
+    depends on the content. On the animated reference film q17 really
+    costs 0.43 of q01 where the ladder says 0.65, so the plan promises
+    less runtime than the cartridge has. On a grainy live-action clip the
+    same rung costs 0.75, so the plan promises more.
+    """
+    return [
+        "",
+        "This choice is an estimate. Measured against real bakes the ladder runs",
+        "about 50% conservative on animation and about 13% optimistic on grainy",
+        "live action, because how much a colour reduction saves depends on the",
+        "content. A bake that overruns now fails rather than shipping a cartridge",
+        "that stops tracking the source. To settle it by measurement instead, use",
+        "the cartridge tool with --quality search.",
+    ]
+
+
 def _budget_lines(fit: Fit, reference_rate: float, has_audio: bool) -> list[str]:
     tiles = tile_rate_for(fit.tier, reference_rate) * fit.minutes
     crom = tiles * TILE_BYTES
@@ -395,6 +416,7 @@ def format_plan(
             f" {clock(nearest.capacity_minutes * SAFETY_MARGIN)} or shorter.",
         ]
     lines += _budget_lines(chosen, reference_rate, has_audio)
+    lines += _estimate_caveat()
     return "\n".join(lines)
 
 
