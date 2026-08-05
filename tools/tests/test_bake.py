@@ -5,7 +5,6 @@ import importlib.util
 import itertools
 import json
 import subprocess
-from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
@@ -734,16 +733,12 @@ class TestQualityResolution:
         with pytest.raises(ValueError, match="unknown quality tier"):
             bake._resolve_quality(self.args(synthetic_clip, quality="cinematic"))
 
-    def test_auto_measures_the_source_and_picks_a_tier(self, synthetic_clip):
-        tier = bake._resolve_quality(self.args(synthetic_clip, quality="auto"))
+    def test_auto_is_refused_and_says_where_to_go(self, synthetic_clip):
+        with pytest.raises(SystemExit) as raised:
+            bake._resolve_quality(self.args(synthetic_clip, quality="auto"))
 
-        assert tier is not None
-        assert tier.name in {row.name for row in quality.LADDER}
-
-    def test_auto_reports_the_ladder_before_baking(self, synthetic_clip, capsys):
-        bake._resolve_quality(self.args(synthetic_clip, quality="auto"))
-
-        assert "Quality ladder" in capsys.readouterr().err
+        assert "search" in str(raised.value)
+        assert "plan" in str(raised.value)
 
 
 class TestPaletteEpochFlag:
@@ -985,36 +980,6 @@ class TestPaletteSampling:
         stride = bake.stride_for_epoch(epoch_frames=frames_per_epoch)
 
         assert abs(frames_per_epoch / stride - bake.SAMPLES_PER_EPOCH) < bake.SAMPLES_PER_EPOCH
-
-
-class TestTierSelectionKnowsTheSource:
-    """The planner and the baker have to agree on what is reachable.
-
-    Filtering unreachable rungs inside quality is not enough on its own:
-    the baker has to pass the source rate in, or it picks a tier that it
-    will then refuse to bake.
-    """
-
-    def test_it_never_chooses_a_hold_the_baker_would_refuse(
-        self, synthetic_clip, monkeypatch, capsys
-    ):
-        monkeypatch.setattr(bake.calibrate, "measure_anchors", lambda *_a, **_k: (100_000.0, None))
-        monkeypatch.setattr(
-            bake.frames,
-            "probe",
-            lambda *_a, **_k: frames_mod.VideoInfo(
-                duration=1080.0, width=1280, height=720, fps=Fraction(24, 1)
-            ),
-        )
-        args = bake._parse_args(
-            ["--source", str(synthetic_clip), "--duration", "1050", "--quality", "auto"]
-        )
-
-        tier = bake._resolve_quality(args)
-        capsys.readouterr()
-
-        assert tier is not None
-        assert bake.frames.source_frames_kept(tier.frame_hold, Fraction(24, 1)) < 1.0
 
 
 class TestAnOverrunIsAFailure:

@@ -64,7 +64,7 @@ class TestSourceValidation:
 
 class TestBakeInvocation:
     def test_it_forwards_the_source(self, movie, recorded):
-        cartridge.main([str(movie)])
+        cartridge.main([str(movie), "--quality", "q17"])
 
         argv = recorded["bake"]
 
@@ -72,18 +72,11 @@ class TestBakeInvocation:
         assert argv[argv.index("--source") + 1] == str(movie)
 
     def test_it_forwards_an_explicit_subtitle_file(self, movie, captions, recorded):
-        cartridge.main([str(movie), "--subtitles", str(captions)])
+        cartridge.main([str(movie), "--quality", "q17", "--subtitles", str(captions)])
 
         argv = recorded["bake"]
 
         assert argv[argv.index("--subtitles") + 1] == str(captions)
-
-    def test_it_asks_for_the_automatic_tier_by_default(self, movie, recorded):
-        cartridge.main([str(movie)])
-
-        argv = recorded["bake"]
-
-        assert argv[argv.index("--quality") + 1] == "auto"
 
     def test_a_named_tier_is_forwarded_instead(self, movie, recorded):
         cartridge.main([str(movie), "--quality", "q20"])
@@ -93,12 +86,12 @@ class TestBakeInvocation:
         assert argv[argv.index("--quality") + 1] == "q20"
 
     def test_no_duration_is_passed_when_the_whole_film_is_wanted(self, movie, recorded):
-        cartridge.main([str(movie)])
+        cartridge.main([str(movie), "--quality", "q17"])
 
         assert "--duration" not in recorded["bake"]
 
     def test_a_trim_is_forwarded(self, movie, recorded):
-        cartridge.main([str(movie), "--start", "12", "--duration", "300"])
+        cartridge.main([str(movie), "--quality", "q17", "--start", "12", "--duration", "300"])
 
         argv = recorded["bake"]
 
@@ -108,18 +101,18 @@ class TestBakeInvocation:
 
 class TestCartridgeBuild:
     def test_it_runs_the_build_after_a_good_bake(self, movie, recorded):
-        code = cartridge.main([str(movie)])
+        code = cartridge.main([str(movie), "--quality", "q17"])
 
         assert code == 0
         assert "build-in-docker.sh" in " ".join(recorded["build"])
 
     def test_the_build_is_told_which_directory_to_use(self, movie, tmp_path, recorded):
-        cartridge.main([str(movie), "--build-dir", str(tmp_path / "out")])
+        cartridge.main([str(movie), "--quality", "q17", "--build-dir", str(tmp_path / "out")])
 
         assert recorded["env"]["BUILD"] == str(tmp_path / "out")
 
     def test_bake_only_stops_before_the_build(self, movie, recorded):
-        code = cartridge.main([str(movie), "--bake-only"])
+        code = cartridge.main([str(movie), "--quality", "q17", "--bake-only"])
 
         assert code == 0
         assert "build" not in recorded
@@ -127,7 +120,7 @@ class TestCartridgeBuild:
     def test_a_failed_bake_skips_the_build(self, movie, monkeypatch, recorded):
         monkeypatch.setattr(cartridge.bake, "main", lambda _argv: 3)
 
-        code = cartridge.main([str(movie)])
+        code = cartridge.main([str(movie), "--quality", "q17"])
 
         assert code == 3
         assert "build" not in recorded
@@ -139,7 +132,7 @@ class TestReporting:
         out.mkdir()
         (out / "aesmovie.neo").write_bytes(b"")
 
-        cartridge.main([str(movie), "--build-dir", str(out)])
+        cartridge.main([str(movie), "--quality", "q17", "--build-dir", str(out)])
 
         assert "build" in recorded
         assert "aesmovie.neo" in capsys.readouterr().out
@@ -338,3 +331,48 @@ class TestMeasuringARung:
         )
 
         assert len(set(directories)) == len(directories)
+
+
+class TestTheDefaultIsMeasured:
+    def test_naming_no_rung_settles_it_by_baking(self, movie, monkeypatch):
+        asked: list[str] = []
+        monkeypatch.setattr(
+            cartridge.probe,
+            "search",
+            lambda **_k: (
+                asked.append("searched") or cartridge.probe.Outcome(tier=None, minutes=1.0)
+            ),
+        )
+        monkeypatch.setattr(cartridge.frames, "probe", lambda *_a, **_k: _stub_info())
+
+        cartridge.main([str(movie)])
+
+        assert asked == ["searched"]
+
+    def test_a_named_rung_is_taken_as_given(self, movie, recorded):
+        cartridge.main([str(movie), "--quality", "q20"])
+
+        argv = recorded["bake"]
+
+        assert argv[argv.index("--quality") + 1] == "q20"
+
+
+class TestTheSearchKnowsTheSource:
+    def test_it_passes_the_source_rate_so_unreachable_rungs_are_never_baked(
+        self, movie, tmp_path, monkeypatch
+    ):
+        seen: dict[str, object] = {}
+
+        def capture(**kwargs):
+            seen.update(kwargs)
+            return cartridge.probe.Outcome(tier=cartridge.quality.tier_by_name("q17"), minutes=1.0)
+
+        monkeypatch.setattr(cartridge.probe, "search", capture)
+        monkeypatch.setattr(cartridge.frames, "probe", lambda *_a, **_k: _stub_info())
+        monkeypatch.setattr(cartridge.bake, "main", lambda _argv: 0)
+        monkeypatch.setattr(cartridge.subprocess, "run", lambda *_a, **_k: None)
+
+        cartridge.main([str(movie), "--tier-cache", str(tmp_path / "t.json"), "--bake-only"])
+
+        assert seen["source_fps"] == pytest.approx(24.0)
+        assert seen["vblank_fps"] == pytest.approx(float(frames.VBLANK_FPS))

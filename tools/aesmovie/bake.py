@@ -31,7 +31,6 @@ import numpy.typing as npt
 
 from aesmovie import (
     adpcmb,
-    calibrate,
     content,
     encode,
     fixtiles,
@@ -837,44 +836,25 @@ def _resolve_duration(args: argparse.Namespace) -> float:
 
 
 def _resolve_quality(args: argparse.Namespace) -> quality.Tier | None:
-    """Pick the tier, measuring the source when asked to choose.
+    """Pick the tier.
 
-    `auto` calibrates and reports before anything is baked, because the
-    choice it makes is the one worth arguing with, and a bake is far too
-    slow to be the place that argument happens.
+    A rung is named or it is not chosen here. Estimating one from a
+    sample was measured to be wrong in both directions and cannot be
+    fixed, because what a colour reduction saves depends on the content
+    rather than on the setting. The cartridge tool settles it by baking;
+    `aesmovie.plan` prints the estimate for a human to look at.
     """
     if args.quality is None:
         return None
-    info = frames.probe(args.source)
-    minutes = min(args.duration, max(0.0, info.duration - args.start))
-    minutes /= quality.SECONDS_PER_MINUTE
-    if args.quality != "auto":
-        return quality.tier_by_name(args.quality)
-
-    rate, anchors = calibrate.measure_anchors(
-        args.source, fit=args.fit, seed=args.seed, start=args.start, duration=args.duration
-    )
-    print(
-        quality.format_plan(
-            source=str(args.source),
-            minutes=minutes,
-            width=info.width,
-            height=info.height,
-            source_fps=float(info.fps),
-            has_audio=has_audio_stream(args.source),
-            reference_rate=rate,
-            vblank_fps=float(frames.VBLANK_FPS),
-            anchors=anchors,
-        ),
-        file=sys.stderr,
-    )
-    scope = {"source_fps": float(info.fps), "vblank_fps": float(frames.VBLANK_FPS)}
-    shortfall = quality.shortfall_message(minutes, rate, anchors, **scope)
-    if shortfall is not None:
-        raise SystemExit(shortfall)
-    chosen = quality.select(minutes, rate, anchors, **scope)
-    assert chosen is not None
-    return chosen.tier
+    if args.quality == "auto":
+        message = (
+            "'auto' is gone: it guessed the tier from a sample and the guess was wrong "
+            "in both directions. Name a rung, or let the cartridge tool measure one "
+            "with --quality search. To see the estimate without acting on it, run "
+            "python -m aesmovie.plan."
+        )
+        raise SystemExit(message)
+    return quality.tier_by_name(args.quality)
 
 
 def _pick[Knob: (int, float)](

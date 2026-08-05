@@ -228,10 +228,9 @@ happens. If nothing fits, it stops and reports that rather than baking
 something that would run out of dictionary partway through. It never trims the
 source to make a tier fit; shortening a film is the owner's decision.
 
-### Measuring instead of estimating
+### How the rung gets chosen
 
-`--quality auto` samples the source and extrapolates, which is fast and reads a
-little high. `--quality search` does not estimate at all:
+Nothing estimates it. `--quality search` is the default, and it bakes:
 
 ```bash
 uv --project tools run python -m aesmovie.cartridge ~/Movies/my-film.mkv \
@@ -270,16 +269,18 @@ a hash tells a reviewer nothing:
 ```
 
 The first run is expensive. A source whose answer sits at `q17` bakes
-seventeen times to get there, and each bake is minutes. Use it when the tier
-matters more than the wait, and use `auto` otherwise.
+seventeen times to get there, and each bake is minutes. When you already know
+the rung, name it and skip all of that. To see an estimate before committing to
+a long run, `aesmovie.plan` prints the whole ladder in about two minutes
+without baking anything, and says plainly that it is an estimate.
 
 ### Common flags
 
 | Flag | Use |
 |:-----|:----|
 | `--subtitles PATH` | A SubRip `.srt`. Defaults to one beside the source |
-| `--quality q17` | Force a tier instead of measuring. `auto` is the default |
-| `--quality search` | Bake down from `q01` until one fits, and remember the result |
+| `--quality search` | The default. Bake down from `q01` until one fits, and remember it |
+| `--quality q17` | Name a rung and skip the measuring |
 | `--tier-cache PATH` | Where `search` keeps its readings. Defaults to `aesmovie-tiers.json` |
 | `--dither` | Ordered threshold across palette entries. Off by default, see below |
 | `--start 90 --duration 300` | Take five minutes starting at 1:30 rather than the whole file |
@@ -363,15 +364,15 @@ uv --project tools run python -m aesmovie.plan --source my-film.mkv
 
 # bake. --duration defaults to the rest of the file
 uv --project tools run python -m aesmovie.bake \
-    --source my-film.mkv --quality auto \
+    --source my-film.mkv --quality q17 \
     --subtitles my-film.srt --build-dir build --preview build/preview.mp4
 
 # build the ROM from whatever is already baked
 bash toolchain/build-in-docker.sh
 ```
 
-The baker carries far more knobs than the wrapper exposes, and every one of
-them overrides the tier that `auto` chose:
+The baker takes a named rung rather than choosing one, and carries far more
+knobs than the wrapper exposes. Every one of them overrides the rung's value:
 `--chroma-weight`, `--denoise`, `--frame-hold`, `--target-fps`, `--tolerance`,
 `--keyframe-interval`, `--palette-epoch-seconds`, `--tile-budget`,
 `--scene-cut-floor`, `--candidates`, `--sample-stride`, `--seed`.
@@ -432,15 +433,10 @@ Cartridge budget at this tier
   audio     15.8 MiB of 16.0 MiB     99%   at 55.6 kHz, grade 1 of 35
 ```
 
-`q31` is absent because this source runs at 24 fps. Holding each frame for
-two refreshes shows it at 29.6 fps, which still shows every frame the source
-had, so the rung saves no tiles and the baker refuses it. The planner leaves
-out rungs the baker would refuse rather than offering them and failing later.
-
-That last block is a projection and it runs high: the bake it describes spent
-846,784 tiles, 81% rather than 90%. Calibration samples short windows and each
-one starts with a cold dictionary, where almost every slot mints a tile, while
-a full bake amortises reuse across 35,274 frames.
+`q31` is absent from that listing because this source runs at 24 fps. The
+rung exists and works on a 30 fps source; see [Every rung](#every-rung). The
+planner leaves out rungs the baker would refuse rather than offering them and
+failing later.
 
 That last block is a projection, and it runs high. The bake it describes
 actually spent 846,784 tiles, 81% rather than 90%. Calibration samples short
@@ -453,19 +449,9 @@ Every tier is listed whether it fits or not, with the exact overshoot, so
 trimming the source stays a decision made with the numbers in view.
 Calibration runs in about two minutes where the bake it informs takes about eight.
 
-The thirty-five rungs are not an arbitrary subdivision. Colour falls
-geometrically, about 6% off the previous rung each time, so every step is the
-same proportional change rather than the same absolute one. That is the right
-shape for a perceptual knob: five points off 100% is invisible, while five
-points off 10% is half the colour weight. The printed percentages look uneven
-only because they are rounded to whole numbers. Tolerance rises geometrically
-alongside, and cost falls close to linearly, roughly 3% of the reference rung
-per step.
-
-Frame rate only starts dropping at `q31`, once colour has bottomed out at 8%
-and cheapening it further has stopped buying anything. An earlier hand-picked
-ladder had a rung that was strictly worse than the one below it, which is the
-failure this ordering removes.
+Cost falls close to linearly, roughly 3% of the reference rung per step. An
+earlier hand-picked ladder had a rung that was strictly worse than the one
+below it, which is the failure this ordering removes.
 
 Thirty-five is a deliberate count rather than padding. The planner takes the
 highest rung that fits and therefore always rounds down, so the gap between
@@ -496,27 +482,90 @@ monotonically, error rises monotonically, and no rung is dominated. The method
 and the two defects the sweep uncovered are in the
 [development log](CHANGELOG.md#the-ladder-is-a-frontier-and-now-it-is-checked).
 
-### What `auto` can and cannot tell you
+### Every rung
 
-`--quality auto` estimates. It samples the source, prices the rungs against a
-single table of relative costs, and takes the best that fits. Measurement says
-that table cannot be right for every film, because how much a colour reduction
-saves depends on what is on screen. Against `q01` on the same clip, `q17`
-really costs 0.43 on flat-shaded animation and 0.75 on grainy live action,
-while the table says 0.65.
+Thirty-five rungs, `q01` through `q35`, numbered in order. Cost falls strictly
+from each rung to the next, so a higher number is always cheaper and never
+looks better. Nothing is missing from the numbering and nothing is out of
+order.
 
-Sitting between the two means it errs both ways: roughly 50% conservative on
-animation, so it picks a lower rung than it needs and promises less runtime
-than the cartridge holds, and roughly 13% optimistic on live action, so it
-promises runtime that is not there. The plan it prints says this too.
+Colour is the only lever until `q30`. It falls geometrically, about 6% off the
+previous rung each time, so every step is the same proportional change rather
+than the same absolute one. That is the right shape for a perceptual knob: five
+points off 100% is invisible, five points off 10% is half the colour weight.
+The percentages look uneven only because they are rounded to whole numbers.
 
-Neither costs a bad cartridge. A bake that runs out of dictionary fails with
-the tier named rather than shipping a cart that silently stops tracking the
-source, so an optimistic estimate costs a wasted bake.
+Frame rate only starts dropping at `q31`, once colour has bottomed out at 8%
+and cheapening it further has stopped buying anything.
 
-`--quality search` has none of this. It bakes from `q01` down and keeps the
-first rung that fits, so it never consults the table. The full measurement is
+| Rung | Colour | Frame rate | Redraw threshold | Cost vs `q01` | Skipped when |
+|:-----|-------:|-----------:|-----------------:|--------------:|:-------------|
+| `q01` | 100% | 59.2 | 0.000500 | 1.000 | never |
+| `q02` | 94% | 59.2 | 0.000558 | 0.979 | never |
+| `q03` | 89% | 59.2 | 0.000623 | 0.954 | never |
+| `q04` | 84% | 59.2 | 0.000695 | 0.925 | never |
+| `q05` | 79% | 59.2 | 0.000775 | 0.900 | never |
+| `q06` | 74% | 59.2 | 0.000865 | 0.874 | never |
+| `q07` | 70% | 59.2 | 0.000965 | 0.850 | never |
+| `q08` | 66% | 59.2 | 0.001077 | 0.829 | never |
+| `q09` | 62% | 59.2 | 0.001201 | 0.809 | never |
+| `q10` | 58% | 59.2 | 0.001341 | 0.789 | never |
+| `q11` | 54% | 59.2 | 0.001496 | 0.770 | never |
+| `q12` | 51% | 59.2 | 0.001669 | 0.751 | never |
+| `q13` | 48% | 59.2 | 0.001862 | 0.733 | never |
+| `q14` | 45% | 59.2 | 0.002078 | 0.713 | never |
+| `q15` | 42% | 59.2 | 0.002319 | 0.693 | never |
+| `q16` | 39% | 59.2 | 0.002587 | 0.674 | never |
+| `q17` | 37% | 59.2 | 0.002887 | 0.654 | never |
+| `q18` | 34% | 59.2 | 0.003222 | 0.634 | never |
+| `q19` | 31% | 59.2 | 0.003595 | 0.613 | never |
+| `q20` | 28% | 59.2 | 0.004011 | 0.593 | never |
+| `q21` | 26% | 59.2 | 0.004475 | 0.573 | never |
+| `q22` | 24% | 59.2 | 0.004994 | 0.553 | never |
+| `q23` | 22% | 59.2 | 0.005572 | 0.532 | never |
+| `q24` | 20% | 59.2 | 0.006218 | 0.510 | never |
+| `q25` | 18% | 59.2 | 0.006938 | 0.489 | never |
+| `q26` | 16% | 59.2 | 0.007741 | 0.466 | never |
+| `q27` | 14% | 59.2 | 0.008638 | 0.445 | never |
+| `q28` | 12% | 59.2 | 0.009638 | 0.422 | never |
+| `q29` | 10% | 59.2 | 0.010754 | 0.401 | never |
+| `q30` | 8% | 59.2 | 0.012000 | 0.380 | never |
+| `q31` | 8% | 29.6 | 0.012000 | 0.343 | source is 29.6 fps or slower |
+| `q32` | 8% | 19.7 | 0.012000 | 0.286 | source is 19.7 fps or slower |
+| `q33` | 8% | 14.8 | 0.012000 | 0.233 | source is 14.8 fps or slower |
+| `q34` | 8% | 11.8 | 0.012000 | 0.201 | source is 11.8 fps or slower |
+| `q35` | 8% | 9.9 | 0.012000 | 0.173 | source is 9.9 fps or slower |
+
+**Redraw threshold** is how much a tile must change before the player spends a
+slot redrawing it. It rises with the colour reduction, because a picture
+already charged less for colour error has nothing to gain from being redrawn
+on a colour change too small to see.
+
+**Skipped when** is about the source, not about the ladder. A rung that holds
+each frame for two refreshes shows the movie at 29.6 fps. Given a 24 fps
+source that still shows every frame the source had, so the rung drops nothing
+and saves nothing, and the baker refuses it rather than pretending. `q31`
+therefore does not appear for a 24 fps film and does appear for a 30 fps one.
+The rung is not missing; it just has nothing to do at that frame rate.
+
+### Why nothing guesses the rung
+
+There used to be a `--quality auto` that sampled the source, priced the rungs
+against the table above, and picked the best that fits. It is gone, because
+measurement showed the table cannot be right for every film: what a colour
+reduction saves depends on what is on screen. Against `q01` on the same clip,
+`q17` really costs 0.43 on flat-shaded animation and 0.75 on grainy live
+action, while the table says 0.65.
+
+Sitting between the two means being wrong both ways, roughly 50% conservative
+on animation and 13% optimistic on live action, and re-fitting the table on one
+film would only move the error onto every other film. The full measurement is
 in the [development log](CHANGELOG.md#one-ladder-cannot-price-every-film).
+
+So the rung is either named by you or settled by baking. `--quality search` is
+the default and consults no table at all. `aesmovie.plan` still prints the
+estimate, clearly labelled as one, for a human to look at before committing to
+a long bake.
 
 ### What live action costs
 

@@ -38,8 +38,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--quality",
-        default="auto",
-        help="a tier name such as q17, auto to calibrate, or search to measure by baking",
+        default="search",
+        help="a rung such as q17, or search to settle it by baking. Default: search",
     )
     parser.add_argument(
         "--tier-cache",
