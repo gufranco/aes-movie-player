@@ -21,6 +21,15 @@ spends a slot on a color the content does not contain.
 
 Distance is squared Oklab throughout, matching `oklab_distance_sq` in
 the DoomNG `palette.py`.
+
+Optional ordered dithering trades a little spatial noise for smoother
+gradients. Error diffusion is unavailable here for a structural reason:
+it makes a tile's output depend on its neighbours, so two identical
+source tiles stop quantising alike and stop interning as one, which
+spends the C-ROM this design is short of. A Bayer threshold has neither
+problem. It depends only on where a pixel sits inside its own tile, and
+because the matrix is 8x8 and a tile is 16x16 it also runs continuously
+across tile boundaries, so identical tiles still collapse to one entry.
 """
 
 from __future__ import annotations
@@ -40,8 +49,36 @@ CRAM_BANKS: Final = 256
 DESCRIPTOR_DIMS: Final = 9
 _KMEANS_ITERATIONS: Final = 24
 _ASSIGN_CHUNK_BYTES: Final = 64 << 20
+_MIX_SCALE: Final = 255.0
 
 DEFAULT_CHROMA_WEIGHT: Final = 1.0
+
+_BAYER_ORDER: Final = 8
+_BAYER_8 = np.array(
+    [
+        [0, 32, 8, 40, 2, 34, 10, 42],
+        [48, 16, 56, 24, 50, 18, 58, 26],
+        [12, 44, 4, 36, 14, 46, 6, 38],
+        [60, 28, 52, 20, 62, 30, 54, 22],
+        [3, 35, 11, 43, 1, 33, 9, 41],
+        [51, 19, 59, 27, 49, 17, 57, 25],
+        [15, 47, 7, 39, 13, 45, 5, 37],
+        [63, 31, 55, 23, 61, 29, 53, 21],
+    ],
+    dtype=np.float32,
+)
+
+
+def bayer_thresholds() -> npt.NDArray[np.float32]:
+    """A tile-sized threshold field in [0, 1), tiled from the 8x8 matrix.
+
+    TILE_PX is a multiple of the matrix order, so every tile sees the
+    same field and identical tiles still quantise identically.
+    """
+    unit = (_BAYER_8 + 0.5) / float(_BAYER_ORDER * _BAYER_ORDER)
+    repeat = TILE_PX // _BAYER_ORDER
+    return np.tile(unit, (repeat, repeat)).astype(np.float32)
+
 
 _OKLAB_GRIDS: dict[float, npt.NDArray[np.float32]] = {}
 
@@ -124,6 +161,32 @@ class Assignment:
         if self.palette_ids.size == 0:
             return np.zeros((0, TILE_PX, TILE_PX), dtype=np.uint16)
         return palette_set.colors[self.palette_ids[:, None, None], self.nibbles - 1]
+
+
+def _two_nearest(
+    distance: npt.NDArray[np.float32],
+) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
+    """The two closest slots per colour, and how far between them it sits.
+
+    The share is the nearer radius over the sum of both, so it is 0 when
+    the colour lands on a palette entry and rises to half when the two
+    are equidistant. Ordered dithering then swaps in the runner-up for
+    that fraction of the pixels in a tile.
+    """
+    pair = np.argpartition(distance, 1, axis=1)[:, :2]
+    picked = np.take_along_axis(distance, pair, axis=1)
+    swapped = picked[:, 0] > picked[:, 1]
+    nearest = np.where(swapped, pair[:, 1], pair[:, 0])
+    runner = np.where(swapped, pair[:, 0], pair[:, 1])
+    near = np.sqrt(np.minimum(picked[:, 0], picked[:, 1]))
+    far = np.sqrt(np.maximum(picked[:, 0], picked[:, 1]))
+    total = near + far
+    share = np.divide(near, total, out=np.zeros_like(near), where=total > 0.0)
+    return (
+        nearest.astype(np.uint8),
+        runner.astype(np.uint8),
+        np.rint(share * _MIX_SCALE).astype(np.uint8),
+    )
 
 
 def _sqdist(
@@ -261,18 +324,28 @@ def build_palette_set(
 class PaletteAssigner:
     """Picks the best palette for each tile and emits its pixel indices."""
 
-    def __init__(self, palette_set: PaletteSet, *, candidates: int = 0) -> None:
+    def __init__(
+        self, palette_set: PaletteSet, *, candidates: int = 0, dither: bool = False
+    ) -> None:
         self._palette_set = palette_set
         self._candidates = min(candidates if candidates > 0 else len(palette_set), len(palette_set))
         grid = oklab_grid(palette_set.chroma_weight)
         total = len(palette_set)
         self._slot = np.zeros((total, grid.shape[0]), dtype=np.uint8)
         self._error = np.zeros((total, grid.shape[0]), dtype=np.float32)
+        self._second = np.zeros((total, grid.shape[0]), dtype=np.uint8) if dither else None
+        self._mix = np.zeros((total, grid.shape[0]), dtype=np.uint8) if dither else None
         for index in range(total):
             palette_lab = grid[palette_set.colors[index]]
             distance = ((grid[:, None, :] - palette_lab[None, :, :]) ** 2).sum(axis=2)
             self._slot[index] = np.argmin(distance, axis=1).astype(np.uint8)
             self._error[index] = np.min(distance, axis=1).astype(np.float32)
+            if self._second is not None and self._mix is not None:
+                nearest, runner, share = _two_nearest(distance)
+                self._slot[index] = nearest
+                self._second[index] = runner
+                self._mix[index] = share
+        self._threshold = (bayer_thresholds().reshape(TILE_PIXELS) * _MIX_SCALE).astype(np.float32)
         self._chunk = max(1, _ASSIGN_CHUNK_BYTES // (self._candidates * TILE_PIXELS * 4))
 
     def assign(self, tiles: npt.NDArray[np.uint16]) -> Assignment:
@@ -301,13 +374,24 @@ class PaletteAssigner:
             chosen = picks[rows, winner]
             palette_ids[start:stop] = chosen.astype(np.uint8)
             best_error[start:stop] = errors[rows, winner]
-            nibbles[start:stop] = self._slot[chosen[:, None], pixels] + 1
+            nibbles[start:stop] = self._quantise(chosen, pixels) + 1
 
         return Assignment(
             palette_ids=palette_ids,
             nibbles=nibbles.reshape(count, TILE_PX, TILE_PX),
             error=best_error,
         )
+
+    def _quantise(
+        self, chosen: npt.NDArray[np.int64], pixels: npt.NDArray[np.uint16]
+    ) -> npt.NDArray[np.uint8]:
+        """Pixel indices for a chunk of tiles, dithered when asked for."""
+        nearest = self._slot[chosen[:, None], pixels]
+        if self._second is None or self._mix is None:
+            return nearest
+        share = self._mix[chosen[:, None], pixels]
+        runner = self._second[chosen[:, None], pixels]
+        return np.where(share > self._threshold[None, :], runner, nearest).astype(np.uint8)
 
     def _shortlist(self, tiles: npt.NDArray[np.uint16]) -> npt.NDArray[np.int64]:
         total = len(self._palette_set)

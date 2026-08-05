@@ -57,6 +57,7 @@ class EncodeOptions:
     tile_budget: int = 0
     rate_control_gain: float = 4.0
     max_tolerance_scale: float = 4096.0
+    dither: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -545,7 +546,9 @@ def _enter_epoch(
     """Move the encoder onto a new epoch's colours."""
     screen.retarget(palette_set)
     dictionary.reseed(epoch)
-    return palettes.PaletteAssigner(palette_set, candidates=options.candidates)
+    return palettes.PaletteAssigner(
+        palette_set, candidates=options.candidates, dither=options.dither
+    )
 
 
 def _record_frame(

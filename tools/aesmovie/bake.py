@@ -250,6 +250,7 @@ class BakeRequest:
     frame_hold: int = 1
     motion_blur: int = 0
     motion_masking: float = 0.0
+    dither: bool = False
     chroma_weight: float = 1.0
     scene_cut_floor: float = 0.01
     palette_epoch_seconds: float = 5.0
@@ -287,6 +288,7 @@ class BakeOutcome:
             "frame_hold": self.request.frame_hold,
             "motion_blur": self.request.motion_blur,
             "motion_masking": self.request.motion_masking,
+            "dither": self.request.dither,
             "chroma_weight": self.request.chroma_weight,
             "scene_cut_floor": self.request.scene_cut_floor,
             "palette_epoch_seconds": self.request.palette_epoch_seconds,
@@ -715,6 +717,7 @@ def run(request: BakeRequest) -> BakeOutcome:
             seed=request.seed,
             frame_hold=request.frame_hold,
             motion_masking=request.motion_masking,
+            dither=request.dither,
             chroma_weight=request.chroma_weight,
             scene_cut_floor=request.scene_cut_floor,
             tile_budget=request.tile_budget,
@@ -802,6 +805,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--motion-blur", type=int, default=0)
     parser.add_argument("--target-fps", type=float, default=None)
     parser.add_argument("--motion-masking", type=float, default=0.0)
+    parser.add_argument(
+        "--dither",
+        action="store_true",
+        help="ordered threshold across palette entries, to break up banding",
+    )
     parser.add_argument("--chroma-weight", type=float, default=None)
     parser.add_argument("--scene-cut-floor", type=float, default=None)
     parser.add_argument("--palette-epoch-seconds", type=float, default=None)
@@ -949,6 +957,7 @@ def main(argv: list[str] | None = None) -> int:
             frame_hold=frame_hold,
             motion_blur=args.motion_blur,
             motion_masking=args.motion_masking,
+            dither=args.dither,
             chroma_weight=_pick(args.chroma_weight, tier.chroma_weight if tier else None, 1.0),
             scene_cut_floor=scene_cut_floor,
             palette_epoch_seconds=palette_epoch_seconds,
