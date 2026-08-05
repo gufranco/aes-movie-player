@@ -248,9 +248,24 @@ uv --project tools run python -m aesmovie.cartridge ~/Movies/my-film.mkv \
     --quality search
 ```
 
-It bakes `q01`. If that overruns the dictionary, it bakes `q02`, then `q03`,
-and so on down the ladder. The first rung that fits is the answer. Nothing is
-predicted, so nothing can be predicted wrong.
+It bakes `q01` first, because a film that can afford the richest rung should
+cost one bake to find out. When `q01` does not fit it doubles its stride,
+`q02`, `q04`, `q08`, until something fits, then bisects the span that doubling
+just proved. The rung it lands on is the same one a plain walk down the ladder
+would reach, checked across the range; what the doubling buys is that a film
+settling deep costs about nine bakes rather than thirty.
+
+That is not an estimate. Cost falls strictly from each rung to the next, so
+the rungs that fit are a block at the bottom of the ladder and only its
+boundary has to be found. Nothing is predicted, so nothing can be predicted
+wrong.
+
+A rung has to fit on its own terms. Rate control will degrade a picture to
+keep it inside the budget, and a rung rescued that way is nominally richer than
+the one below it while looking worse, so a rung that only fits because the
+controller reached its ceiling does not count as fitting. A bake that cannot
+finish is also abandoned as soon as that is certain, rather than encoding the
+rest of a film whose verdict is already known.
 
 Every rung it settles is written to `aesmovie-tiers.json` at the top of the
 project, a rung that fit as a rate and a rung that overran as a refusal. A
@@ -273,17 +288,18 @@ a hash tells a reviewer nothing:
       "digest": "9ab1...",
       "window": { "start": 0.0, "duration": 528.0, "fit": "fill" },
       "quality": "q05",
-      "tiers": { "q01": null, "q02": null, "q03": null, "q04": null, "q05": 118204.5 }
+      "tiers": { "q01": null, "q02": null, "q04": 121870.2, "q03": null, "q05": 118204.5 }
     }
   }
 }
 ```
 
-The first run is expensive. A source whose answer sits at `q17` bakes
-seventeen times to get there, and each bake is minutes. When you already know
-the rung, name it and skip all of that. To see an estimate before committing to
-a long run, `aesmovie.plan` prints the whole ladder in about two minutes
-without baking anything, and says plainly that it is an estimate.
+The first run is still the expensive one. A film that lands at `q01` costs a
+single bake; one that lands deep costs about nine, and each is minutes. When
+you already know the rung, name it and skip all of that. To see an estimate
+before committing to a long run, `aesmovie.plan` prints the whole ladder in
+about two minutes without baking anything, and says plainly that it is an
+estimate.
 
 ### Common flags
 
