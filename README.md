@@ -242,11 +242,32 @@ It bakes `q01`. If that overruns the dictionary, it bakes `q02`, then `q03`,
 and so on down the ladder. The first rung that fits is the answer. Nothing is
 predicted, so nothing can be predicted wrong.
 
-Every rung it settles is written to a cache keyed on the source's own bytes, a
-rung that fit as a rate and a rung that overran as a refusal. A second run over
-the same file re-reads that and bakes nothing. Renaming the file keeps the
-cache; editing it, or asking for a different window, starts over, because a
-reading over ten minutes says nothing certain about sixty.
+Every rung it settles is written to `aesmovie-tiers.json` at the top of the
+project, a rung that fit as a rate and a rung that overran as a refusal. A
+second run over the same file re-reads that and bakes nothing. Renaming the
+file keeps the entry; editing it, or asking for a different window, starts
+over, because a reading over ten minutes says nothing certain about sixty.
+
+That file is meant to be committed. What it holds is a property of the film and
+the ladder, not of one workstation, so checking it in lets anyone building the
+same cartridge skip the same bakes. Each entry carries the file name, a digest,
+the window, and the chosen tier beside the readings, because a key that is only
+a hash tells a reviewer nothing:
+
+```json
+{
+  "version": 3,
+  "sources": {
+    "0f3c...": {
+      "file": "my-film.mkv",
+      "digest": "9ab1...",
+      "window": { "start": 0.0, "duration": 528.0, "fit": "fill" },
+      "quality": "q05",
+      "tiers": { "q01": null, "q02": null, "q03": null, "q04": null, "q05": 118204.5 }
+    }
+  }
+}
+```
 
 The first run is expensive. A source whose answer sits at `q17` bakes
 seventeen times to get there, and each bake is minutes. Use it when the tier
@@ -259,7 +280,8 @@ matters more than the wait, and use `auto` otherwise.
 | `--subtitles PATH` | A SubRip `.srt`. Defaults to one beside the source |
 | `--quality q17` | Force a tier instead of measuring. `auto` is the default |
 | `--quality search` | Bake down from `q01` until one fits, and remember the result |
-| `--tier-cache PATH` | Where `search` keeps its readings. Defaults to the user cache |
+| `--tier-cache PATH` | Where `search` keeps its readings. Defaults to `aesmovie-tiers.json` |
+| `--dither` | Ordered threshold across palette entries. Off by default, see below |
 | `--start 90 --duration 300` | Take five minutes starting at 1:30 rather than the whole file |
 | `--build-dir DIR` | Put everything somewhere other than `build/` |
 | `--preview out.mp4` | Also render what the cartridge will show, for checking by eye |
@@ -736,6 +758,41 @@ error of tiles the encoder *wrote* improves whenever the encoder skips more
 work, so it rewards doing less; the fidelity number here charges every slot
 of every frame against the true source frame instead.
 
+### Ordered dithering, which costs nothing and changes nothing
+
+Gradient blocking is visible on flat areas, and dithering the source before
+quantisation does nothing about it, because the banding comes from the fifteen
+colours a tile may use rather than from the colour word. Dithering where pixels
+are matched to a palette is the version that could work, and the dictionary
+rules out the obvious form of it. Error diffusion makes a tile's output depend
+on its neighbours, so two identical source tiles stop quantising alike and stop
+interning as one, which spends the C-ROM the whole design is short of.
+
+An ordered threshold has neither problem. The matrix is 8x8 and a tile is
+16x16, so the field depends only on where a pixel sits inside its own tile and
+still runs continuously across tile boundaries. It is built as a second-nearest
+palette entry and a blend fraction beside the nearest one already precomputed
+per palette and colour, and it is live behind `--dither`.
+
+The interning worry was unfounded, and measurably so. On a 30-second window at
+`q17` the dictionary moved from 54,250 tiles to 54,192, which is 0.11% and in
+the cheaper direction. Identical tiles still collapse to one entry, which the
+tests pin directly rather than inferring from the count.
+
+It also does not help. Per-pixel error rose 0.6% and `displayed_error` rose
+12.3%, which is what a metric that ranks noise harshly is expected to say about
+added noise and is not on its own a verdict. The verdict is that at 7x zoom on
+the closing card and on the opening sky, the dithered and undithered frames are
+not distinguishable. The reason is visible in the mechanism: palettes are
+refitted every epoch against the tiles actually on screen, so in a flat region
+the nearest entry is already close, the blend fraction sits near zero, and the
+threshold almost never fires. The dither has little left to do because the
+palette fitting already did it.
+
+So it ships off. The flag stays because the cost is zero and a source with
+harsher gradients than this one may yet want it, but nothing here argues for
+turning it on, and a knob that is on by default should have evidence behind it.
+
 ## Hardware notes worth knowing
 
 The address port sits at 0x3C0000 and the data port immediately after it, so
@@ -1030,20 +1087,9 @@ capture.
 
 ### What is left
 
-1. **Gradient blocking.** Visible on flat areas such as the closing card.
-   Dithering the source before quantisation was tried and does nothing,
-   because the banding comes from the fifteen colours a tile may use rather
-   than from the colour word. Dithering where pixels are matched to a palette
-   is the untried version, and the dictionary rules out the obvious form of
-   it. Error diffusion makes a tile's output depend on its neighbours, so two
-   identical source tiles stop quantising alike and stop interning as one,
-   which spends the C-ROM the whole design is short of. An ordered threshold
-   whose period divides 16 has neither problem: it depends only on where a
-   pixel sits inside its own tile, and it still runs continuously across tile
-   boundaries. It fits the existing lookup as a second-nearest entry and a
-   blend fraction beside the nearest one already precomputed per palette and
-   colour. Whether it beats the banding is a question for a person and a full
-   bake, since the metric already proved it ranks smearing highest.
+Nothing on the list. Gradient blocking was the last entry and it is now
+answered, though not the way the entry expected. What the ordered threshold
+turned out to be is written up under [What did not work](#what-did-not-work).
 
 ### Standing rules for this project
 
