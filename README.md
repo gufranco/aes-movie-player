@@ -224,8 +224,33 @@ the names do not match.
 
 The ladder is printed before the bake starts, because that choice is the one
 worth arguing with and a bake is far too slow to be where the argument
-happens. If nothing fits, it stops and tells you how much to trim rather than
-baking something that would run out of dictionary partway through.
+happens. If nothing fits, it stops and reports that rather than baking
+something that would run out of dictionary partway through. It never trims the
+source to make a tier fit; shortening a film is the owner's decision.
+
+### Measuring instead of estimating
+
+`--quality auto` samples the source and extrapolates, which is fast and reads a
+little high. `--quality search` does not estimate at all:
+
+```bash
+uv --project tools run python -m aesmovie.cartridge ~/Movies/my-film.mkv \
+    --quality search
+```
+
+It bakes `q01`. If that overruns the dictionary, it bakes `q02`, then `q03`,
+and so on down the ladder. The first rung that fits is the answer. Nothing is
+predicted, so nothing can be predicted wrong.
+
+Every rung it settles is written to a cache keyed on the source's own bytes, a
+rung that fit as a rate and a rung that overran as a refusal. A second run over
+the same file re-reads that and bakes nothing. Renaming the file keeps the
+cache; editing it, or asking for a different window, starts over, because a
+reading over ten minutes says nothing certain about sixty.
+
+The first run is expensive. A source whose answer sits at `q17` bakes
+seventeen times to get there, and each bake is minutes. Use it when the tier
+matters more than the wait, and use `auto` otherwise.
 
 ### Common flags
 
@@ -233,6 +258,8 @@ baking something that would run out of dictionary partway through.
 |:-----|:----|
 | `--subtitles PATH` | A SubRip `.srt`. Defaults to one beside the source |
 | `--quality q17` | Force a tier instead of measuring. `auto` is the default |
+| `--quality search` | Bake down from `q01` until one fits, and remember the result |
+| `--tier-cache PATH` | Where `search` keeps its readings. Defaults to the user cache |
 | `--start 90 --duration 300` | Take five minutes starting at 1:30 rather than the whole file |
 | `--build-dir DIR` | Put everything somewhere other than `build/` |
 | `--preview out.mp4` | Also render what the cartridge will show, for checking by eye |
