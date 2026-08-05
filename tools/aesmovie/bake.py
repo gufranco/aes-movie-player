@@ -44,6 +44,7 @@ from aesmovie import (
 
 SECONDS_PER_MINUTE: Final = 60.0
 CROM_BANK_BYTES: Final = 128 << 20
+OVERRAN: Final = 4
 ADPCM_B_BYTES: Final = 16 << 20
 V_ROM_MIN_BYTES: Final = 1 << 19
 MAX_SAMPLE_TILES: Final = 200_000
@@ -913,6 +914,18 @@ def _resolve_frame_hold(args: argparse.Namespace, tier: quality.Tier | None) -> 
     return hold
 
 
+def _overran(report: dict[str, object]) -> bool:
+    """Whether the encoder ran out of room rather than finishing the film.
+
+    Rate control degrades quality to stay inside the budget, and that is
+    the healthy path. When even its ceiling is not enough the dictionary
+    fills, every later frame stops interning new tiles, and the picture
+    quietly stops tracking the source. That has to be a failure: the
+    build otherwise succeeds and the cartridge looks finished.
+    """
+    return bool(report.get("dictionary_full")) or bool(report.get("budget_exceeded"))
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     args.duration = _resolve_duration(args)
@@ -977,11 +990,20 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     report = outcome.report()
+    if _overran(report):
+        print(
+            f"the dictionary ran out at tier '{args.quality}': "
+            f"{report['tile_count']} tiles with the film unfinished. "
+            "Everything past that point stops tracking the source. "
+            "Choose a cheaper tier, or run the cartridge tool with "
+            "--quality search to measure one.",
+            file=sys.stderr,
+        )
     if args.report_json is not None:
         args.report_json.parent.mkdir(parents=True, exist_ok=True)
         args.report_json.write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))
-    return 0
+    return OVERRAN if _overran(report) else 0
 
 
 if __name__ == "__main__":

@@ -1015,3 +1015,20 @@ class TestTierSelectionKnowsTheSource:
 
         assert tier is not None
         assert bake.frames.source_frames_kept(tier.frame_hold, Fraction(24, 1)) < 1.0
+
+
+class TestAnOverrunIsAFailure:
+    def test_a_full_dictionary_is_reported_as_overran(self):
+        assert bake._overran({"dictionary_full": True, "budget_exceeded": False})
+
+    def test_an_exceeded_budget_is_reported_as_overran(self):
+        assert bake._overran({"dictionary_full": False, "budget_exceeded": True})
+
+    def test_a_finished_bake_is_not_an_overrun(self):
+        assert not bake._overran({"dictionary_full": False, "budget_exceeded": False})
+
+    def test_a_report_missing_both_fields_is_not_an_overrun(self):
+        assert not bake._overran({})
+
+    def test_the_overrun_code_is_distinct_from_every_other_failure(self):
+        assert bake.OVERRAN not in (0, 1, 2, 3)

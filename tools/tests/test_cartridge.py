@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from fractions import Fraction
+from pathlib import Path
 
 import pytest
 
-from aesmovie import cartridge, frames
+from aesmovie import cartridge, frames, tiercache
 
 
 @pytest.fixture
@@ -179,3 +181,160 @@ class TestSearchingForTheTier:
 
 def _stub_info():
     return frames.VideoInfo(width=1280, height=720, duration=600.0, fps=Fraction(24, 1))
+
+
+def _reading_bake(monkeypatch, *, tiles, full=False, exceeded=False, status=0, write_report=True):
+    """Stand in for a bake that reports what it spent."""
+    seen: list[str] = []
+
+    def fake_bake(argv):
+        tier = argv[argv.index("--quality") + 1]
+        seen.append(tier)
+        if "--report-json" in argv and write_report:
+            report = Path(argv[argv.index("--report-json") + 1])
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_text(
+                json.dumps(
+                    {
+                        "tile_count": tiles(tier),
+                        "dictionary_full": full,
+                        "budget_exceeded": exceeded,
+                    }
+                )
+            )
+        return status
+
+    monkeypatch.setattr(cartridge.bake, "main", fake_bake)
+    monkeypatch.setattr(cartridge.frames, "probe", lambda *_a, **_k: _stub_info())
+    return seen
+
+
+class TestMeasuringARung:
+    def test_a_finished_bake_becomes_a_rate(self, tmp_path, movie, monkeypatch):
+        store = tmp_path / "tiers.json"
+        _reading_bake(monkeypatch, tiles=lambda _t: 1_000)
+
+        cartridge.main(
+            [
+                str(movie),
+                "--quality",
+                "search",
+                "--tier-cache",
+                str(store),
+                "--build-dir",
+                str(tmp_path / "out"),
+                "--bake-only",
+                "--duration",
+                "60",
+            ]
+        )
+
+        assert tiercache.recall(store, next(iter(json.loads(store.read_text())["sources"]))) == {
+            "q01": pytest.approx(1_000.0)
+        }
+
+    def test_a_bake_that_refuses_is_remembered_as_a_refusal(
+        self, tmp_path, movie, monkeypatch, capsys
+    ):
+        store = tmp_path / "tiers.json"
+        _reading_bake(monkeypatch, tiles=lambda _t: 5, full=True, status=cartridge.bake.OVERRAN)
+
+        code = cartridge.main(
+            [
+                str(movie),
+                "--quality",
+                "search",
+                "--tier-cache",
+                str(store),
+                "--build-dir",
+                str(tmp_path / "out"),
+                "--bake-only",
+                "--duration",
+                "60",
+            ]
+        )
+
+        rates = tiercache.recall(store, next(iter(json.loads(store.read_text())["sources"])))
+
+        assert code != 0
+        assert set(rates.values()) == {None}
+        assert "fits no tier" in capsys.readouterr().err
+
+    def test_a_bake_that_leaves_no_report_counts_as_a_refusal(self, tmp_path, movie, monkeypatch):
+        store = tmp_path / "tiers.json"
+        _reading_bake(monkeypatch, tiles=lambda _t: 1, write_report=False)
+
+        code = cartridge.main(
+            [
+                str(movie),
+                "--quality",
+                "search",
+                "--tier-cache",
+                str(store),
+                "--build-dir",
+                str(tmp_path / "out"),
+                "--bake-only",
+                "--duration",
+                "60",
+            ]
+        )
+
+        assert code != 0
+
+    def test_an_exceeded_budget_counts_as_a_refusal_even_on_a_clean_exit(
+        self, tmp_path, movie, monkeypatch
+    ):
+        store = tmp_path / "tiers.json"
+        _reading_bake(monkeypatch, tiles=lambda _t: 9, exceeded=True, status=0)
+
+        code = cartridge.main(
+            [
+                str(movie),
+                "--quality",
+                "search",
+                "--tier-cache",
+                str(store),
+                "--build-dir",
+                str(tmp_path / "out"),
+                "--bake-only",
+                "--duration",
+                "60",
+            ]
+        )
+
+        assert code != 0
+
+    def test_each_rung_is_measured_in_its_own_directory(self, tmp_path, movie, monkeypatch):
+        store = tmp_path / "tiers.json"
+        directories: list[str] = []
+
+        def fake_bake(argv):
+            if "--report-json" not in argv:
+                return 0
+            directories.append(argv[argv.index("--build-dir") + 1])
+            report = Path(argv[argv.index("--report-json") + 1])
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_text(
+                json.dumps({"tile_count": 1, "dictionary_full": False, "budget_exceeded": False})
+            )
+            return 0
+
+        monkeypatch.setattr(cartridge.bake, "main", fake_bake)
+        monkeypatch.setattr(cartridge.frames, "probe", lambda *_a, **_k: _stub_info())
+
+        cartridge.main(
+            [
+                str(movie),
+                "--quality",
+                "search",
+                "--tier-cache",
+                str(store),
+                "--build-dir",
+                str(tmp_path / "out"),
+                "--bake-only",
+                "--duration",
+                "60",
+            ]
+        )
+
+        assert len(set(directories)) == len(directories)

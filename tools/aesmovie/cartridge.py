@@ -127,12 +127,12 @@ def _measured_tier(args: argparse.Namespace) -> quality.Tier | None:
         argv = [*bake_argv(args), "--report-json", str(report)]
         argv[argv.index("--quality") + 1] = tier.name
         argv[argv.index("--build-dir") + 1] = str(scratch / tier.name)
-        if bake.main(argv) != 0 or not report.is_file():
+        status = bake.main(argv)
+        if not report.is_file():
             return probe.Reading(tier=tier, tiles=quality.CROM_TILES, capped=True)
         data = json.loads(report.read_text())
-        return probe.Reading(
-            tier=tier, tiles=int(data["tile_count"]), capped=bool(data["dictionary_full"])
-        )
+        capped = status != 0 or bool(data["dictionary_full"]) or bool(data["budget_exceeded"])
+        return probe.Reading(tier=tier, tiles=int(data["tile_count"]), capped=capped)
 
     outcome = probe.search(
         measure=run,
