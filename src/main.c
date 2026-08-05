@@ -3,6 +3,7 @@
 #include "hw.h"
 #include "menu.h"
 #include "movie_data.h"
+#include "timeline.h"
 
 #define VIDEO_FIRST_SPRITE 1
 #define VIDEO_COLUMNS      MOVIE_GRID_COLS
@@ -52,9 +53,7 @@ static void sound_send(uint8_t code)
 
 static uint16_t audio_page_for(uint32_t frame)
 {
-    uint64_t scaled = (uint64_t)frame * MOVIE_AUDIO_PAGE_NUM + (MOVIE_AUDIO_PAGE_DEN / 2u);
-
-    return (uint16_t)(scaled / MOVIE_AUDIO_PAGE_DEN);
+    return timeline_audio_page(frame, MOVIE_AUDIO_PAGE_NUM, MOVIE_AUDIO_PAGE_DEN);
 }
 
 static void audio_seek(uint32_t frame)
@@ -246,71 +245,31 @@ static void apply_frame(uint32_t frame)
 #if MOVIE_SUBTITLE_COUNT > 0
 #define SUBTITLE_RECORD_BYTES (8u + MOVIE_SUBTITLE_COLUMNS * MOVIE_SUBTITLE_LINES)
 
-static uint32_t subtitle_word(uint16_t index, uint16_t offset)
-{
-    const unsigned char *record = movie_subtitles + (uint32_t)index * SUBTITLE_RECORD_BYTES;
-
-    return ((uint32_t)record[offset] << 24) | ((uint32_t)record[offset + 1] << 16) |
-           ((uint32_t)record[offset + 2] << 8) | (uint32_t)record[offset + 3];
-}
-
 /* Returns MOVIE_SUBTITLE_COUNT when no cue covers the frame, which the
  * caller reads as "show nothing" without needing a second sentinel. */
 static uint16_t subtitle_at(uint32_t frame)
 {
-    uint16_t low = 0;
-    uint16_t high = MOVIE_SUBTITLE_COUNT;
-
-    while (low < high) {
-        uint16_t mid = (uint16_t)((low + high) >> 1);
-
-        if (subtitle_word(mid, 0) > frame) {
-            high = mid;
-        } else {
-            low = (uint16_t)(mid + 1);
-        }
-    }
-    if (low == 0) {
-        return MOVIE_SUBTITLE_COUNT;
-    }
-    low--;
-    if (frame >= subtitle_word(low, 4)) {
-        return MOVIE_SUBTITLE_COUNT;
-    }
-    return low;
+    return timeline_subtitle_at(movie_subtitles, MOVIE_SUBTITLE_COUNT, SUBTITLE_RECORD_BYTES,
+                                frame);
 }
 #endif
 
 static uint32_t keyframe_at_or_before(uint32_t frame)
 {
-    const uint32_t *table = (const uint32_t *)movie_keyframes;
-    uint32_t low = 0;
-    uint32_t high = MOVIE_KEYFRAME_COUNT;
-
-    while (low + 1 < high) {
-        uint32_t mid = (low + high) >> 1;
-
-        if (table[mid] <= frame) {
-            low = mid;
-        } else {
-            high = mid;
-        }
-    }
-    return table[low];
+    return timeline_keyframe_at_or_before((const uint32_t *)movie_keyframes,
+                                          MOVIE_KEYFRAME_COUNT, frame);
 }
 
 static uint32_t seconds_to_frames(uint32_t seconds)
 {
-    return (seconds * MOVIE_FPS_NUM) / MOVIE_FPS_DEN;
+    return timeline_seconds_to_frames(seconds, MOVIE_FPS_NUM, MOVIE_FPS_DEN);
 }
 
 static uint32_t seek_to(uint32_t target)
 {
     uint32_t landing;
 
-    if (target >= MOVIE_FRAME_COUNT) {
-        target = MOVIE_FRAME_COUNT - 1;
-    }
+    target = timeline_clamp_frame(target, MOVIE_FRAME_COUNT);
     landing = keyframe_at_or_before(target);
     palettes_for_frame(landing);
     apply_frame(landing);

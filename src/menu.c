@@ -2,6 +2,7 @@
 
 #include "hw.h"
 #include "movie_data.h"
+#include "timeline.h"
 
 /* The fix layer is 32 rows but the raster only shows rows 2 to 29, so the
  * panel is anchored to row 29 rather than to the nominal bottom. Sitting it
@@ -47,7 +48,7 @@ static void fix_poke(uint16_t col, uint16_t row, uint16_t tile)
 
 static uint32_t frame_to_seconds(uint32_t frame)
 {
-    return (uint32_t)((frame * (uint32_t)MOVIE_FPS_DEN) / (uint32_t)MOVIE_FPS_NUM);
+    return timeline_frame_to_seconds(frame, MOVIE_FPS_NUM, MOVIE_FPS_DEN);
 }
 
 static void draw_clock(uint16_t col, uint16_t row, uint32_t seconds)
@@ -99,7 +100,7 @@ void menu_hide(void)
 static void draw_seek_bar(uint32_t frame, uint32_t total)
 {
     uint16_t span = MENU_BAR_CELLS - 1u;
-    uint16_t filled = (uint16_t)((total > 1u) ? (frame * span) / (total - 1u) : 0u);
+    uint16_t filled = timeline_bar_fill(frame, total, span);
     uint16_t col;
 
     for (col = 0; col < MENU_BAR_CELLS; col++) {

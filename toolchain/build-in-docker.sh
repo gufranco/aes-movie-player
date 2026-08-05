@@ -76,19 +76,20 @@ CFLAGS=(
     -Wall -Wextra -Werror
 )
 
-for unit in main menu; do
+for unit in main menu timeline; do
     echo "CC src/$unit.c"
     retry_build m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "src/$unit.c" -o "$BUILD/$unit.o"
 done
 
 echo "CHECK VRAM write spacing"
-python3 tools/scripts/check_vram_timing.py "$BUILD/main.o" "$BUILD/menu.o"
+python3 tools/scripts/check_vram_timing.py "$BUILD/main.o" "$BUILD/menu.o" \
+    "$BUILD/timeline.o"
 
 echo "AS $GENERATED/movie_data.S"
 retry_build m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "$GENERATED/movie_data.S" -o "$BUILD/movie_data.o"
 
 echo "LD $BUILD/rom.elf"
-retry_build m68k-neogeo-elf-gcc -o "$BUILD/rom.elf" "$BUILD/main.o" "$BUILD/menu.o" "$BUILD/movie_data.o" \
+retry_build m68k-neogeo-elf-gcc -o "$BUILD/rom.elf" "$BUILD/main.o" "$BUILD/menu.o" "$BUILD/timeline.o" "$BUILD/movie_data.o" \
     -Wl,-Map="$BUILD/rom.map" "${NGDEVKIT_LIBS[@]}"
 
 echo "[ram] section sizes:"
