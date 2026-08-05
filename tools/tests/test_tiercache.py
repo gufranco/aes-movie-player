@@ -112,6 +112,7 @@ class TestStoringMeasurements:
 
 
 class TestTheFileIsReadable:
+    @pytest.mark.reads_real_store
     def test_it_lives_at_the_top_of_the_project(self):
         store = tiercache.default_store()
 

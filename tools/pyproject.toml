@@ -41,4 +41,7 @@ disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "reads_real_store: reads the project tier file without writing it",
+]
 addopts = "-q"
