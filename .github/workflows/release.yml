@@ -2,6 +2,13 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      level:
+        description: "Force a bump level. Leave as commits to let the history decide."
+        required: false
+        default: commits
+        type: choice
+        options: [commits, patch, minor, major]
 
 permissions:
   contents: write
@@ -42,14 +49,27 @@ jobs:
           uv --project tools run python -m pytest tools/tests \
             --cov=aesmovie --cov-fail-under=95
 
-      - name: What the commits say the next version is
-        run: uv --project tools run semantic-release --noop version --print
+      - name: What the next version will be
+        env:
+          LEVEL: ${{ inputs.level }}
+        run: |
+          set -euo pipefail
+          if [ "$LEVEL" = "commits" ]; then
+            uv --project tools run semantic-release --noop version --print
+          else
+            uv --project tools run semantic-release --noop version "--$LEVEL" --print
+          fi
 
       - name: Tag and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LEVEL: ${{ inputs.level }}
         run: |
           set -euo pipefail
           git config user.name "${GITHUB_ACTOR}"
           git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
-          uv --project tools run semantic-release version --push --vcs-release
+          if [ "$LEVEL" = "commits" ]; then
+            uv --project tools run semantic-release version --push --vcs-release
+          else
+            uv --project tools run semantic-release version "--$LEVEL" --push --vcs-release
+          fi
