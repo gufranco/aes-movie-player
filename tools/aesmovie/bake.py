@@ -858,10 +858,11 @@ def _resolve_quality(args: argparse.Namespace) -> quality.Tier | None:
         ),
         file=sys.stderr,
     )
-    shortfall = quality.shortfall_message(minutes, rate, anchors)
+    scope = {"source_fps": float(info.fps), "vblank_fps": float(frames.VBLANK_FPS)}
+    shortfall = quality.shortfall_message(minutes, rate, anchors, **scope)
     if shortfall is not None:
         raise SystemExit(shortfall)
-    chosen = quality.select(minutes, rate, anchors)
+    chosen = quality.select(minutes, rate, anchors, **scope)
     assert chosen is not None
     return chosen.tier
 
