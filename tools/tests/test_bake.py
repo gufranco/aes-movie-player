@@ -1032,3 +1032,35 @@ class TestAnOverrunIsAFailure:
 
     def test_the_overrun_code_is_distinct_from_every_other_failure(self):
         assert bake.OVERRAN not in (0, 1, 2, 3)
+
+
+class TestASilentSourceSaysSo:
+    def test_a_source_without_a_soundtrack_is_announced(self, tmp_path, monkeypatch, capsys):
+        silent = tmp_path / "silent.mkv"
+        silent.write_bytes(b"")
+        monkeypatch.setattr(bake, "has_audio_stream", lambda *_a, **_k: False)
+        monkeypatch.setattr(bake, "_resolve_duration", lambda *_a, **_k: 10.0)
+
+        with pytest.raises((FileNotFoundError, subprocess.CalledProcessError)):
+            bake.main(["--source", str(silent), "--quality", "q17"])
+
+        assert "silent" in capsys.readouterr().err
+
+    def test_a_source_with_a_soundtrack_says_nothing_about_it(self, tmp_path, monkeypatch, capsys):
+        noisy = tmp_path / "noisy.mkv"
+        noisy.write_bytes(b"")
+        monkeypatch.setattr(bake, "has_audio_stream", lambda *_a, **_k: True)
+        monkeypatch.setattr(bake, "_resolve_duration", lambda *_a, **_k: 10.0)
+
+        with pytest.raises((FileNotFoundError, subprocess.CalledProcessError)):
+            bake.main(["--source", str(noisy), "--quality", "q17"])
+
+        assert "silent" not in capsys.readouterr().err
+
+    def test_an_unreadable_source_is_not_called_silent(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(bake, "_resolve_duration", lambda *_a, **_k: 10.0)
+
+        with pytest.raises((FileNotFoundError, subprocess.CalledProcessError)):
+            bake.main(["--source", str(tmp_path / "absent.mkv"), "--quality", "q17"])
+
+        assert "silent" not in capsys.readouterr().err

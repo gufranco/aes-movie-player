@@ -294,6 +294,7 @@ class BakeOutcome:
             "scene_cut_floor": self.request.scene_cut_floor,
             "palette_epoch_seconds": self.request.palette_epoch_seconds,
             "palette_epochs": len(self.result.palette_sets),
+            "has_audio": "voice" in self.artifacts,
             "tile_budget": self.request.tile_budget,
             "tile_count": stats.tile_count,
             "dictionary_full": stats.dictionary_full,
@@ -929,6 +930,12 @@ def _overran(report: dict[str, object]) -> bool:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     args.duration = _resolve_duration(args)
+    if args.source.is_file() and not has_audio_stream(args.source):
+        print(
+            f"{args.source} carries no audio track, so the cartridge will be silent. "
+            "Nothing is wrong with the video; there is simply no soundtrack to encode.",
+            file=sys.stderr,
+        )
     tier = _resolve_quality(args)
     profile = content.measure(args.source, duration=_PROFILE_SECONDS)
     scene_cut_floor = (
