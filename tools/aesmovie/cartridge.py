@@ -136,8 +136,12 @@ def _measured_tier(args: argparse.Namespace) -> quality.Tier | None:
     )
     for name, rate in outcome.rates.items():
         tiercache.remember(store, key, name, rate)
+    if outcome.too_expensive:
+        print(f"overran: {', '.join(outcome.too_expensive)}", file=sys.stderr)
     if outcome.baked:
-        print(f"baked to find out: {', '.join(outcome.baked)}", file=sys.stderr)
+        print(f"baked {len(outcome.baked)} rung(s) to settle it", file=sys.stderr)
+    else:
+        print("settled entirely from remembered measurements", file=sys.stderr)
     return outcome.tier
 
 

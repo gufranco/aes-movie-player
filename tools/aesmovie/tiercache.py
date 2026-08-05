@@ -12,9 +12,13 @@ makes it worth doing once is this: the reading is stored against the
 source's own bytes, and every later run reads it back instead of
 sampling anything.
 
-Rates are kept per tier rather than as a verdict. A verdict answers one
-runtime; a rate answers every runtime, so trimming or extending the
-window later needs no bake at all.
+A reading is stored against the window it measured, start and duration
+included in the key, because a rate taken over ten minutes says nothing
+certain about sixty: a film's second hour is not as busy as its first.
+Widening the window asks a new question and gets a fresh bake.
+
+What is stored per rung is a rate rather than a verdict, so the same
+reading answers both "does this fit" and "by how much".
 """
 
 from __future__ import annotations
@@ -22,13 +26,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from aesmovie import quality
 
 SAMPLE_BYTES = 1 << 20
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +80,7 @@ def key_for(source: Path, params: Params) -> str:
     ).hexdigest()
 
 
-def _read(store: Path) -> dict[str, dict[str, float]]:
+def _read(store: Path) -> dict[str, dict[str, float | None]]:
     try:
         loaded = json.loads(Path(store).read_text())
     except (OSError, ValueError):
@@ -83,65 +88,55 @@ def _read(store: Path) -> dict[str, dict[str, float]]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def recall(store: Path, key: str) -> dict[str, float]:
-    """Every tier rate known for this source, in tiles per minute."""
+def recall(store: Path, key: str) -> dict[str, float | None]:
+    """What is settled about this source.
+
+    A number is the rate that tier really cost, in tiles per minute. A
+    null is a rung that was baked and overran, which is worth keeping so
+    it is never baked again.
+    """
     return dict(_read(store).get(key, {}))
 
 
-def remember(store: Path, key: str, tier: str, tiles_per_minute: float) -> None:
-    """Record what one tier actually cost, leaving other readings alone."""
+def remember(store: Path, key: str, tier: str, tiles_per_minute: float | None) -> None:
+    """Record one settled rung, leaving the others alone."""
     store = Path(store)
     known = _read(store)
-    known.setdefault(key, {})[tier] = float(tiles_per_minute)
+    value = None if tiles_per_minute is None else float(tiles_per_minute)
+    known.setdefault(key, {})[tier] = value
     store.parent.mkdir(parents=True, exist_ok=True)
     store.write_text(json.dumps(known, indent=2, sort_keys=True))
 
 
-def nearest_measured(rates: dict[str, float], tier: quality.Tier) -> str | None:
-    """The measured rung closest in cost to the one being asked about."""
-    if not rates:
-        return None
-    return min(
-        rates,
-        key=lambda name: abs(quality.tier_by_name(name).relative_cost - tier.relative_cost),
-    )
+def settled(rates: Mapping[str, float | None], tier: quality.Tier) -> bool:
+    """Whether this rung has already been baked for this source."""
+    return tier.name in rates
 
 
-def predict(rates: dict[str, float], tier: quality.Tier, minutes: float) -> float | None:
-    """Tiles this tier would spend, from readings rather than from a sample.
-
-    A rung that was measured answers for itself. Any other is scaled from
-    the closest reading by the ladder's own ratio, which the sweep put
-    within a couple of percent across the colour rungs.
-    """
-    if tier.name in rates:
-        return rates[tier.name] * minutes
-    anchor = nearest_measured(rates, tier)
-    if anchor is None:
-        return None
-    known = quality.tier_by_name(anchor)
-    return rates[anchor] * (tier.relative_cost / known.relative_cost) * minutes
+def fits(rates: Mapping[str, float | None], tier: quality.Tier) -> bool:
+    """Whether a settled rung fit. Meaningless for an unsettled one."""
+    return rates.get(tier.name) is not None
 
 
-def best_fitting(
-    rates: dict[str, float],
+def best_known_fit(
+    rates: Mapping[str, float | None],
     *,
-    minutes: float,
-    budget: int,
     source_fps: float | None = None,
     vblank_fps: float | None = None,
 ) -> quality.Tier | None:
-    """The best rung whose measured cost stays inside the budget."""
+    """The best rung already proved to fit, without predicting anything.
+
+    Walks from the best rung down and stops at the first that is both
+    settled and fitting. A rung that has never been baked stops the walk
+    rather than being guessed at, because an unsettled rung above the
+    answer is exactly what still needs measuring.
+    """
     for tier in quality.LADDER:
-        if (
-            source_fps is not None
-            and vblank_fps is not None
-            and not quality.reachable(tier, source_fps=source_fps, vblank_fps=vblank_fps)
-        ):
-            continue
-        cost = predict(rates, tier, minutes)
-        if cost is None:
+        if source_fps is not None and vblank_fps is not None:  # noqa: SIM102
+            if not quality.reachable(tier, source_fps=source_fps, vblank_fps=vblank_fps):
+                continue
+        if not settled(rates, tier):
             return None
-        if cost <= budget:
+        if fits(rates, tier):
             return tier
     return None

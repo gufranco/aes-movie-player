@@ -35,11 +35,30 @@ class TestSearching:
         better = quality.LADDER[quality.LADDER.index(found.tier) - 1]
         assert 100_000.0 * better.relative_cost * MINUTES > BUDGET
 
-    def test_it_does_not_bake_the_whole_ladder(self):
+    def test_it_starts_at_the_best_rung_and_walks_down(self):
         log: list[str] = []
         probe.search(measure=measurer(100_000.0, log), minutes=MINUTES, budget=BUDGET, known={})
 
-        assert len(log) < 6
+        assert log[0] == "q01"
+        assert log == [t.name for t in quality.LADDER[: len(log)]]
+
+    def test_it_stops_at_the_first_rung_that_fits(self):
+        log: list[str] = []
+        found = probe.search(
+            measure=measurer(100_000.0, log), minutes=MINUTES, budget=BUDGET, known={}
+        )
+
+        assert found.tier is not None
+        assert log[-1] == found.tier.name
+
+    def test_a_rung_that_overran_is_remembered_as_such(self):
+        log: list[str] = []
+        found = probe.search(
+            measure=measurer(100_000.0, log), minutes=MINUTES, budget=BUDGET, known={}
+        )
+
+        assert found.rates["q01"] is None
+        assert found.too_expensive[0] == "q01"
 
     def test_a_capped_bake_never_becomes_a_rate(self):
         log: list[str] = []
@@ -48,15 +67,35 @@ class TestSearching:
         )
 
         for name, rate in found.rates.items():
+            if rate is None:
+                continue
             tier = quality.tier_by_name(name)
             assert rate == pytest.approx(100_000.0 * tier.relative_cost, rel=1e-6)
+            assert rate * MINUTES <= BUDGET
 
-    def test_readings_already_known_shorten_the_search(self):
+    def test_a_fully_settled_source_bakes_nothing(self):
         log: list[str] = []
-        known = {"q17": 100_000.0}
+        known: dict[str, float | None] = {
+            t.name: (None if t.relative_cost > 1.0 else 100_000.0 * t.relative_cost)
+            for t in quality.LADDER
+        }
+
+        found = probe.search(
+            measure=measurer(100_000.0, log), minutes=MINUTES, budget=BUDGET, known=known
+        )
+
+        assert log == []
+        assert found.tier is not None
+        assert found.tier.name == "q17"
+
+    def test_settled_failures_are_not_baked_again(self):
+        log: list[str] = []
+        known: dict[str, float | None] = {t.name: None for t in quality.LADDER[:10]}
+
         probe.search(measure=measurer(100_000.0, log), minutes=MINUTES, budget=BUDGET, known=known)
 
-        assert len(log) <= 2
+        assert "q01" not in log
+        assert log[0] == "q11"
 
     def test_an_impossible_source_reports_nothing_rather_than_guessing(self):
         log: list[str] = []

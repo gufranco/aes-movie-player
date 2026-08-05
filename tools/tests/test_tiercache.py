@@ -105,62 +105,28 @@ class TestStoringMeasurements:
         assert json.loads(store.read_text())["abc"] == {"q17": 1.0}
 
 
-class TestPredicting:
-    def test_a_measured_tier_is_used_directly(self):
-        rates = {"q17": 100_000.0}
+class TestWhatIsSettled:
+    def test_a_rung_that_overran_is_settled_but_does_not_fit(self, tmp_path):
+        store = tmp_path / "tiers.json"
+        tiercache.remember(store, "abc", "q01", None)
+        rates = tiercache.recall(store, "abc")
+        q01 = quality.tier_by_name("q01")
 
-        assert tiercache.predict(rates, quality.tier_by_name("q17"), 10.0) == pytest.approx(1e6)
+        assert tiercache.settled(rates, q01)
+        assert not tiercache.fits(rates, q01)
 
-    def test_an_unmeasured_tier_is_scaled_from_the_nearest_reading(self):
-        rates = {"q17": 100_000.0}
-        q16 = quality.tier_by_name("q16")
-        q17 = quality.tier_by_name("q17")
+    def test_the_best_known_fit_walks_from_the_top(self):
+        rates: dict[str, float | None] = {"q01": None, "q02": None, "q03": 90_000.0}
 
-        expected = 100_000.0 * (q16.relative_cost / q17.relative_cost) * 10.0
-
-        assert tiercache.predict(rates, q16, 10.0) == pytest.approx(expected)
-
-    def test_with_no_readings_at_all_nothing_can_be_predicted(self):
-        assert tiercache.predict({}, quality.tier_by_name("q17"), 10.0) is None
-
-    def test_the_nearest_reading_is_the_one_closest_in_cost(self):
-        rates = {"q01": 1.0, "q30": 2.0}
-        q29 = quality.tier_by_name("q29")
-
-        chosen = tiercache.nearest_measured(rates, q29)
-
-        assert chosen == "q30"
-
-
-class TestChoosing:
-    def test_it_takes_the_best_rung_that_fits(self):
-        rates = {"q17": 100_000.0}
-
-        tier = tiercache.best_fitting(rates, minutes=10.0, budget=1_020_000)
+        tier = tiercache.best_known_fit(rates)
 
         assert tier is not None
-        assert tier.name == "q17"
+        assert tier.name == "q03"
 
-    def test_a_bigger_budget_reaches_a_better_rung(self):
-        rates = {"q17": 100_000.0}
+    def test_an_unsettled_rung_stops_the_walk_rather_than_being_guessed(self):
+        rates: dict[str, float | None] = {"q01": None, "q03": 90_000.0}
 
-        loose = tiercache.best_fitting(rates, minutes=10.0, budget=10_000_000)
-        tight = tiercache.best_fitting(rates, minutes=10.0, budget=1_020_000)
+        assert tiercache.best_known_fit(rates) is None
 
-        assert loose is not None and tight is not None
-        assert quality.LADDER.index(loose) < quality.LADDER.index(tight)
-
-    def test_nothing_fits_when_the_budget_is_tiny(self):
-        rates = {"q17": 100_000.0}
-
-        assert tiercache.best_fitting(rates, minutes=600.0, budget=1000) is None
-
-    def test_a_tier_the_baker_would_refuse_is_never_chosen(self):
-        rates = {"q17": 100_000.0}
-
-        tier = tiercache.best_fitting(
-            rates, minutes=17.0, budget=1_048_576, source_fps=24.0, vblank_fps=59.185
-        )
-
-        assert tier is not None
-        assert tier.name != "q31"
+    def test_nothing_settled_means_nothing_known(self):
+        assert tiercache.best_known_fit({}) is None

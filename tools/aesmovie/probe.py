@@ -1,17 +1,21 @@
-"""Find the tier a source really supports by baking, not by sampling.
+"""Find the tier a source supports by baking from the best rung down.
 
-Calibration extrapolates from short windows and reads high, because each
-window starts with a cold dictionary while a full bake amortises reuse.
-This measures the thing itself instead.
+Calibration samples short windows and extrapolates, and it reads high by
+construction: every window starts with a cold dictionary where almost
+every slot mints a tile, while a full bake amortises reuse across the
+whole film. On the reference film it predicted 946,352 tiles where the
+encoder spent 846,784.
 
-Baking every rung from the best downwards would settle it, but two facts
-make that wasteful. A bake is about eight minutes, and a rung that
-overruns does not fail: the dictionary caps and the encoder finishes with
-a truncated count, so a saturated bake says only "too expensive" and
-carries no usable rate. So the search measures a rung that fits, takes
-its exact cost, and jumps to the answer that cost implies, checking it.
-Two bakes settle most sources, and every reading is kept so the next run
-spends none.
+So nothing is predicted here. The best rung is baked, and if it overran,
+the next, until one fits. The first that fits is the answer, and there is
+no estimate anywhere to be wrong. That costs a run of bakes the first
+time a source is seen, and nothing at all afterwards, because every rung
+settled this way is remembered against the source's own bytes.
+
+A rung that overruns does not fail: the dictionary caps and the encoder
+finishes with a truncated count. That count is not a rate and is never
+kept as one. What is kept is the fact that the rung overran, so it is
+never baked twice.
 """
 
 from __future__ import annotations
@@ -21,13 +25,10 @@ from dataclasses import dataclass, field
 
 from aesmovie import quality, tiercache
 
-MAX_BAKES = 6
-SEED_TIER = "q24"
-
 
 @dataclass(frozen=True, slots=True)
 class Reading:
-    """What one bake actually spent, and whether it ran out of dictionary."""
+    """What one bake spent, and whether it ran out of dictionary."""
 
     tier: quality.Tier
     tiles: int
@@ -36,16 +37,17 @@ class Reading:
 
 @dataclass(slots=True)
 class Outcome:
-    """The rung the source supports, and the readings that proved it."""
+    """The rung the source supports, and what was learned getting there."""
 
     tier: quality.Tier | None
     minutes: float
-    rates: dict[str, float] = field(default_factory=dict)
+    rates: dict[str, float | None] = field(default_factory=dict)
     baked: list[str] = field(default_factory=list)
     too_expensive: list[str] = field(default_factory=list)
 
 
-def _candidates(source_fps: float | None, vblank_fps: float | None) -> list[quality.Tier]:
+def candidates(source_fps: float | None, vblank_fps: float | None) -> list[quality.Tier]:
+    """The ladder, best first, without rungs the baker would refuse."""
     if source_fps is None or vblank_fps is None:
         return list(quality.LADDER)
     return [
@@ -60,69 +62,35 @@ def search(
     measure: Callable[[quality.Tier], Reading],
     minutes: float,
     budget: int,
-    known: dict[str, float],
+    known: dict[str, float | None],
     source_fps: float | None = None,
     vblank_fps: float | None = None,
-    max_bakes: int = MAX_BAKES,
 ) -> Outcome:
-    """Bake until the best rung that fits is known, then stop.
+    """Bake from the best rung down and stop at the first that fits.
 
     Never shortens the source. A source that fits nowhere comes back with
-    no tier and the readings that showed it, leaving the decision to trim
-    where it belongs.
+    no tier, leaving the decision to trim where it belongs.
     """
-    ladder = _candidates(source_fps, vblank_fps)
     outcome = Outcome(tier=None, minutes=minutes, rates=dict(known))
-    banned: set[str] = set()
 
-    for _ in range(max_bakes):
-        wanted = _best_allowed(outcome.rates, ladder, banned, minutes, budget)
-        if wanted is None:
-            wanted = quality.tier_by_name(SEED_TIER)
-            if wanted not in ladder or wanted.name in banned:
-                wanted = next((t for t in reversed(ladder) if t.name not in banned), None)
-            if wanted is None:
+    for tier in candidates(source_fps, vblank_fps):
+        if tiercache.settled(outcome.rates, tier):
+            if tiercache.fits(outcome.rates, tier):
+                outcome.tier = tier
                 return outcome
+            outcome.too_expensive.append(tier.name)
+            continue
 
-        if wanted.name in outcome.rates and not _needs_proof(outcome, wanted):
-            outcome.tier = wanted
-            return outcome
-
-        reading = measure(wanted)
-        outcome.baked.append(wanted.name)
+        reading = measure(tier)
+        outcome.baked.append(tier.name)
 
         if reading.capped or reading.tiles > budget:
-            banned.add(wanted.name)
-            outcome.too_expensive.append(wanted.name)
-            for tier in ladder:
-                if tier.relative_cost >= wanted.relative_cost:
-                    banned.add(tier.name)
+            outcome.rates[tier.name] = None
+            outcome.too_expensive.append(tier.name)
             continue
 
-        outcome.rates[wanted.name] = reading.tiles / minutes
-        outcome.tier = wanted
+        outcome.rates[tier.name] = reading.tiles / minutes
+        outcome.tier = tier
+        return outcome
 
     return outcome
-
-
-def _needs_proof(outcome: Outcome, tier: quality.Tier) -> bool:
-    """A rung is settled once it has been baked in this run."""
-    return tier.name not in outcome.baked
-
-
-def _best_allowed(
-    rates: dict[str, float],
-    ladder: list[quality.Tier],
-    banned: set[str],
-    minutes: float,
-    budget: int,
-) -> quality.Tier | None:
-    for tier in ladder:
-        if tier.name in banned:
-            continue
-        cost = tiercache.predict(rates, tier, minutes)
-        if cost is None:
-            return None
-        if cost <= budget:
-            return tier
-    return None
