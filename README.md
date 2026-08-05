@@ -19,6 +19,7 @@
   <a href="#quick-start"><strong>Quick start</strong></a> &nbsp;|&nbsp;
   <a href="#verification"><strong>Verification</strong></a> &nbsp;|&nbsp;
   <a href="#hardware-notes-worth-knowing"><strong>Hardware notes</strong></a> &nbsp;|&nbsp;
+  <a href="#what-is-stable"><strong>Stability</strong></a> &nbsp;|&nbsp;
   <a href="CHANGELOG.md"><strong>Development log</strong></a>
 </p>
 
@@ -171,6 +172,7 @@ Read from the source of two independent emulators rather than from prose.
 | Sprites per scanline | 96 | The grid uses 20 |
 | Palettes | 256 banks of 16 colours, index 0 transparent | 240 for video, 16 reserved for the menu |
 | Watchdog | about 0.13 seconds | Bounds any initialisation loop |
+| Raster | 384 by 264 at a 6 MHz dot clock, 59.185 Hz | The same in every region. There is no 50 Hz variant to support |
 
 > [!IMPORTANT]
 > **There is no character-ROM bankswitching, and there cannot be.** Neither
@@ -178,6 +180,15 @@ Read from the source of two independent emulators rather than from prose.
 > MAME carries, and the arithmetic forbids it: 2^20 tiles at 128 bytes each is
 > exactly the 128 MiB the tile number addresses. 128 MiB is an absolute
 > ceiling, not a window. An early design assumed 8 banks of it and was wrong.
+
+The refresh rate deserves its own note, because the whole design is built on
+it: the player advances one movie frame per vblank and the soundtrack is paced
+against the frame count, so a console refreshing at a different rate would run
+the film slow and drift the audio away from it. There is no such console.
+geolith fixes `LSPC_SCANLINES` at 264 with no region variation, and its region
+setting reaches the BIOS jumper and the CD drive rather than the raster. A
+cartridge built here plays at the same rate on a Japanese, American, Asian or
+European board.
 
 ## Quick start
 
@@ -1027,6 +1038,26 @@ Cost follows novel detail, and framing puts the detail in the middle. The
 full measurement is in the [development log](CHANGELOG.md#what-did-not-work).
 
 </details>
+
+## What is stable
+
+From 1.0 these are a promise. They keep working, and anything that would break
+them is a major version.
+
+| Surface | Promise |
+|:--------|:--------|
+| `python -m aesmovie.cartridge <source>` | The one command. Its flags keep their names and meanings: `--subtitles`, `--quality`, `--tier-cache`, `--start`, `--duration`, `--build-dir`, `--preview`, `--fit`, `--dither`, `--bake-only` |
+| `python -m aesmovie.plan --source <file>` | Prints the ladder as an estimate and bakes nothing |
+| Rung names `q01` to `q35` | A name always means the same settings. Rungs are never renumbered |
+| `aesmovie-tiers.json` | Readable, diffable, and safe to commit. Its `version` field guards the shape |
+| `build/aesmovie.neo` and `build/aesmovie.zip` | Where the cartridge lands, and what it is called |
+| Exit codes | 0 on success, non-zero on failure, and a distinct code when a bake ran out of dictionary |
+
+Two things are deliberately not promised. `python -m aesmovie.bake` is the
+low-level baker and carries knobs that exist to be experimented with, so its
+surface can move. The numbers a bake reports in `report.json` are measurements
+rather than an interface; fields may be added, and what they mean is defined by
+the code that computes them.
 
 ## Repository layout
 
