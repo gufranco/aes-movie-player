@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  release:
+    name: Publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: tools/uv.lock
+
+      - name: The tag and the package agree on the version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          want="${TAG#v}"
+          have=$(uv --project tools run python tools/scripts/package_version.py)
+          echo "tag $want, package $have"
+          test "$want" = "$have"
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Sync
+        run: uv --project tools sync --all-groups
+
+      - name: Every gate, again, on the tagged tree
+        run: |
+          set -euo pipefail
+          uv --project tools run ruff format --check tools/
+          uv --project tools run ruff check tools/
+          uv --project tools run mypy tools/aesmovie tools/scripts
+          uv --project tools run python -m pytest tools/tests \
+            --cov=aesmovie --cov-fail-under=95
+
+      - name: Write the notes
+        run: |
+          cat > release-notes.md <<'NOTES'
+          A cartridge is a function of your own film, so there is no ROM to
+          download here. Build one from any file ffmpeg can read:
+
+          ```bash
+          uv --project tools run python -m aesmovie.cartridge your-film.mkv
+          ```
+
+          Prerequisites and flags are in the README. What the project measured,
+          and what it rejected, is in the development log.
+          NOTES
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" --title "$TAG" --notes-file release-notes.md
