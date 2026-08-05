@@ -256,6 +256,7 @@ class BakeRequest:
     palette_epoch_seconds: float = 5.0
     quality: str | None = None
     tile_budget: int = 0
+    stop_when_over_budget: bool = False
     audio_rate_hz: float | None = None
     subtitles: Path | None = None
     """Sample rate for the voice ROM, or None to take the highest that fits.
@@ -311,6 +312,8 @@ class BakeOutcome:
             "mean_error": stats.mean_error,
             "peak_tolerance": stats.peak_tolerance,
             "budget_exceeded": stats.budget_exceeded,
+            "truncated": stats.truncated,
+            "rate_control_exhausted": stats.rate_control_exhausted,
             "displayed_error": stats.displayed_error,
             "projected_crom_bytes_per_minute": round(crom_per_minute),
             "projected_stream_bytes_per_minute": round(stream_per_minute),
@@ -722,6 +725,7 @@ def run(request: BakeRequest) -> BakeOutcome:
             chroma_weight=request.chroma_weight,
             scene_cut_floor=request.scene_cut_floor,
             tile_budget=request.tile_budget,
+            stop_when_over_budget=request.stop_when_over_budget,
             collect_rendered=False,
         ),
         sample_tiles=sample_tiles,
@@ -815,6 +819,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--scene-cut-floor", type=float, default=None)
     parser.add_argument("--palette-epoch-seconds", type=float, default=None)
     parser.add_argument("--tile-budget", type=int, default=None)
+    parser.add_argument(
+        "--stop-when-over-budget",
+        action="store_true",
+        help="abandon the bake once it cannot finish, instead of encoding the rest",
+    )
     parser.add_argument("--palette-count", type=int, default=240)
     parser.add_argument("--base-bank", type=int, default=16)
     parser.add_argument("--keyframe-interval", type=int, default=90)
@@ -904,7 +913,11 @@ def _overran(report: dict[str, object]) -> bool:
     quietly stops tracking the source. That has to be a failure: the
     build otherwise succeeds and the cartridge looks finished.
     """
-    return bool(report.get("dictionary_full")) or bool(report.get("budget_exceeded"))
+    return (
+        bool(report.get("dictionary_full"))
+        or bool(report.get("budget_exceeded"))
+        or bool(report.get("truncated"))
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -963,6 +976,7 @@ def main(argv: list[str] | None = None) -> int:
             palette_epoch_seconds=palette_epoch_seconds,
             quality=tier.name if tier is not None else args.quality,
             tile_budget=_pick(args.tile_budget, tile_budget, 0),
+            stop_when_over_budget=args.stop_when_over_budget,
             palette_count=args.palette_count,
             base_bank=args.base_bank,
             keyframe_interval=args.keyframe_interval,

@@ -57,6 +57,7 @@ class EncodeOptions:
     tile_budget: int = 0
     rate_control_gain: float = 4.0
     max_tolerance_scale: float = 4096.0
+    stop_when_over_budget: bool = False
     dither: bool = False
 
 
@@ -79,6 +80,8 @@ class EncodeStats:
     displayed_error: float
     peak_tolerance: float
     budget_exceeded: bool
+    truncated: bool
+    rate_control_exhausted: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -348,6 +351,8 @@ def _build_stats(
     updates_per_frame: npt.NDArray[np.int32],
     totals: _Totals,
     budget: int,
+    expected_frames: int,
+    tolerance_ceiling: float,
 ) -> EncodeStats:
     tile_count = len(dictionary)
     return EncodeStats(
@@ -372,6 +377,10 @@ def _build_stats(
         ),
         peak_tolerance=totals.peak_tolerance,
         budget_exceeded=bool(budget > 0 and tile_count >= budget),
+        truncated=bool(expected_frames > 0 and len(movie) < expected_frames),
+        rate_control_exhausted=bool(
+            tolerance_ceiling > 0.0 and totals.peak_tolerance >= tolerance_ceiling
+        ),
     )
 
 
@@ -551,6 +560,48 @@ def _enter_epoch(
     )
 
 
+def _advance_epoch(
+    epoch: int,
+    index: int,
+    assigner: palettes.PaletteAssigner,
+    *,
+    epoch_starts: Sequence[int],
+    palette_sets: Sequence[palettes.PaletteSet],
+    screen: _Screen,
+    dictionary: TileDictionary,
+    options: EncodeOptions,
+) -> tuple[int, palettes.PaletteAssigner]:
+    """Move onto the next palette epoch once this frame has reached it."""
+    if epoch + 1 >= len(epoch_starts) or index < epoch_starts[epoch + 1]:
+        return epoch, assigner
+    following = epoch + 1
+    return following, _enter_epoch(palette_sets[following], following, screen, dictionary, options)
+
+
+def _render_buffer(total_frames: int, options: EncodeOptions) -> npt.NDArray[np.uint16]:
+    """Somewhere to keep every rendered frame, when the caller wants them."""
+    kept = total_frames if options.collect_rendered else 0
+    return np.zeros((kept, FRAME_HEIGHT, FRAME_WIDTH), dtype=np.uint16)
+
+
+def _should_stop(dictionary: TileDictionary, options: EncodeOptions) -> bool:
+    """Whether a probe bake has learned everything it can."""
+    return options.stop_when_over_budget and _out_of_room(dictionary, options)
+
+
+def _out_of_room(dictionary: TileDictionary, options: EncodeOptions) -> bool:
+    """Whether this bake can no longer finish inside its budget.
+
+    Once the dictionary is full or the budget is spent, every later frame
+    stops interning new tiles and the picture stops tracking the source.
+    Nothing after that point can change the verdict, so a probe bake has
+    no reason to keep decoding.
+    """
+    if dictionary.is_full():
+        return True
+    return options.tile_budget > 0 and len(dictionary) >= options.tile_budget
+
+
 def _record_frame(
     screen: _Screen,
     incoming: npt.NDArray[np.uint16],
@@ -593,11 +644,7 @@ def encode_stream(
     assigner = _enter_epoch(palette_sets[0], 0, screen, dictionary, options)
     movie = stream.MovieStream()
 
-    rendered = (
-        np.zeros((total_frames, FRAME_HEIGHT, FRAME_WIDTH), dtype=np.uint16)
-        if options.collect_rendered
-        else np.zeros((0, FRAME_HEIGHT, FRAME_WIDTH), dtype=np.uint16)
-    )
+    rendered = _render_buffer(total_frames, options)
     updates_per_frame = np.zeros(total_frames, dtype=np.int32)
     totals, controller = _Totals(), _RateController(options)
     last_keyframe = -options.keyframe_interval
@@ -605,8 +652,7 @@ def encode_stream(
     previous: npt.NDArray[np.uint16] | None = None
     previous_source: npt.NDArray[np.uint16] | None = None
     pending = np.zeros((GRID_ROWS, GRID_COLS), dtype=bool)
-    hold = max(1, options.frame_hold)
-    held: npt.NDArray[np.uint16] | None = None
+    hold, held = max(1, options.frame_hold), None
     for index, incoming in enumerate(_tile_frames(chunks)):
         if index % hold == 0:
             held = incoming
@@ -618,9 +664,16 @@ def encode_stream(
         )
         previous_source = previous
         previous = current
-        if epoch + 1 < len(epoch_starts) and index >= epoch_starts[epoch + 1]:
-            epoch += 1
-            assigner = _enter_epoch(palette_sets[epoch], epoch, screen, dictionary, options)
+        epoch, assigner = _advance_epoch(
+            epoch,
+            index,
+            assigner,
+            epoch_starts=epoch_starts,
+            palette_sets=palette_sets,
+            screen=screen,
+            dictionary=dictionary,
+            options=options,
+        )
         scene_cut = _is_scene_cut(current, previous_source, changed, index, options) or (
             index in epoch_starts and index > 0
         )
@@ -669,13 +722,18 @@ def encode_stream(
             options=options,
             on_render=on_render,
         )
+        if _should_stop(dictionary, options):
+            break
 
+    updates_per_frame = updates_per_frame[: len(movie)]
     stats = _build_stats(
         movie=movie,
         dictionary=dictionary,
         updates_per_frame=updates_per_frame,
         totals=totals,
         budget=options.tile_budget,
+        expected_frames=total_frames,
+        tolerance_ceiling=options.tolerance * options.max_tolerance_scale,
     )
 
     return EncodeResult(

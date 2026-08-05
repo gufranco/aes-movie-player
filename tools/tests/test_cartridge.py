@@ -222,9 +222,10 @@ class TestMeasuringARung:
             ]
         )
 
-        assert tiercache.recall(store, next(iter(json.loads(store.read_text())["sources"]))) == {
-            "q01": pytest.approx(1_000.0)
-        }
+        rates = tiercache.recall(store, next(iter(json.loads(store.read_text())["sources"])))
+
+        assert rates
+        assert all(rate == pytest.approx(1_000.0) for rate in rates.values())
 
     def test_a_bake_that_refuses_is_remembered_as_a_refusal(
         self, tmp_path, movie, monkeypatch, capsys

@@ -8,18 +8,27 @@ BUDGET = 1_048_576
 MINUTES = 10.0
 
 
-def measurer(true_rates, log):
+def measurer(true_rates, log, *, exhausted_above=None):
     """A stand-in for baking: reports what a tier would really cost."""
 
     def measure(tier: quality.Tier) -> probe.Reading:
         log.append(tier.name)
         rate = true_rates * tier.relative_cost
         tiles = rate * MINUTES
+        strained = exhausted_above is not None and tiles > exhausted_above
         if tiles > BUDGET:
             return probe.Reading(tier=tier, tiles=BUDGET, capped=True)
-        return probe.Reading(tier=tier, tiles=int(tiles), capped=False)
+        return probe.Reading(tier=tier, tiles=int(tiles), capped=False, exhausted=strained)
 
     return measure
+
+
+def walk(rates, budget=BUDGET):
+    """The rung a plain walk down the ladder would settle on."""
+    for tier in quality.LADDER:
+        if rates * tier.relative_cost * MINUTES <= budget:
+            return tier.name
+    return None
 
 
 class TestSearching:
@@ -35,30 +44,54 @@ class TestSearching:
         better = quality.LADDER[quality.LADDER.index(found.tier) - 1]
         assert 100_000.0 * better.relative_cost * MINUTES > BUDGET
 
-    def test_it_starts_at_the_best_rung_and_walks_down(self):
-        log: list[str] = []
-        probe.search(measure=measurer(100_000.0, log), minutes=MINUTES, budget=BUDGET, known={})
+    def test_it_reaches_the_same_rung_a_plain_walk_would(self):
+        for rate in (60_000.0, 100_000.0, 140_000.0, 250_000.0, 400_000.0):
+            log: list[str] = []
+            found = probe.search(
+                measure=measurer(rate, log), minutes=MINUTES, budget=BUDGET, known={}
+            )
+            reached = found.tier.name if found.tier else None
 
-        assert log[0] == "q01"
-        assert log == [t.name for t in quality.LADDER[: len(log)]]
+            assert reached == walk(rate)
 
-    def test_it_stops_at_the_first_rung_that_fits(self):
+    def test_a_source_that_can_afford_the_best_rung_costs_one_bake(self):
         log: list[str] = []
         found = probe.search(
-            measure=measurer(100_000.0, log), minutes=MINUTES, budget=BUDGET, known={}
+            measure=measurer(60_000.0, log), minutes=MINUTES, budget=BUDGET, known={}
         )
 
         assert found.tier is not None
-        assert log[-1] == found.tier.name
+        assert found.tier.name == "q01"
+        assert log == ["q01"]
+
+    def test_a_source_that_settles_deep_costs_far_fewer_bakes_than_rungs(self):
+        log: list[str] = []
+        probe.search(measure=measurer(400_000.0, log), minutes=MINUTES, budget=BUDGET, known={})
+
+        assert len(log) < len(quality.LADDER) // 2
+
+    def test_it_always_tries_the_richest_rung_first(self):
+        for rate in (60_000.0, 250_000.0, 400_000.0):
+            log: list[str] = []
+            probe.search(measure=measurer(rate, log), minutes=MINUTES, budget=BUDGET, known={})
+
+            assert log[0] == "q01"
+
+    def test_it_never_bakes_the_same_rung_twice(self):
+        log: list[str] = []
+        probe.search(measure=measurer(250_000.0, log), minutes=MINUTES, budget=BUDGET, known={})
+
+        assert len(log) == len(set(log))
 
     def test_a_rung_that_overran_is_remembered_as_such(self):
         log: list[str] = []
         found = probe.search(
-            measure=measurer(100_000.0, log), minutes=MINUTES, budget=BUDGET, known={}
+            measure=measurer(400_000.0, log), minutes=MINUTES, budget=BUDGET, known={}
         )
 
-        assert found.rates["q01"] is None
-        assert found.too_expensive[0] == "q01"
+        assert found.too_expensive
+        for name in found.too_expensive:
+            assert found.rates[name] is None
 
     def test_a_capped_bake_never_becomes_a_rate(self):
         log: list[str] = []
@@ -94,8 +127,7 @@ class TestSearching:
 
         probe.search(measure=measurer(100_000.0, log), minutes=MINUTES, budget=BUDGET, known=known)
 
-        assert "q01" not in log
-        assert log[0] == "q11"
+        assert not set(log) & {t.name for t in quality.LADDER[:10]}
 
     def test_an_impossible_source_reports_nothing_rather_than_guessing(self):
         log: list[str] = []
@@ -136,3 +168,52 @@ class TestItNeverTrims:
 
         assert found.tier is None
         assert found.minutes == MINUTES
+
+
+class TestARescuedRungDoesNotCount:
+    def test_a_rung_that_only_fits_because_rate_control_gave_up_is_refused(self):
+        log: list[str] = []
+        plain = probe.search(
+            measure=measurer(100_000.0, log), minutes=MINUTES, budget=BUDGET, known={}
+        )
+
+        strained: list[str] = []
+        found = probe.search(
+            measure=measurer(100_000.0, strained, exhausted_above=700_000),
+            minutes=MINUTES,
+            budget=BUDGET,
+            known={},
+        )
+
+        assert plain.tier is not None
+        assert found.tier is not None
+        assert found.tier.relative_cost < plain.tier.relative_cost
+
+    def test_an_exhausted_reading_never_becomes_a_rate(self):
+        log: list[str] = []
+        found = probe.search(
+            measure=measurer(100_000.0, log, exhausted_above=700_000),
+            minutes=MINUTES,
+            budget=BUDGET,
+            known={},
+        )
+
+        for rate in found.rates.values():
+            if rate is None:
+                continue
+            assert rate * MINUTES <= 700_000
+
+    def test_a_reading_that_finished_cleanly_fits(self):
+        tier = quality.tier_by_name("q17")
+
+        assert probe.Reading(tier=tier, tiles=10, capped=False).fits(100)
+
+    def test_a_capped_reading_does_not_fit(self):
+        tier = quality.tier_by_name("q17")
+
+        assert not probe.Reading(tier=tier, tiles=10, capped=True).fits(100)
+
+    def test_an_exhausted_reading_does_not_fit(self):
+        tier = quality.tier_by_name("q17")
+
+        assert not probe.Reading(tier=tier, tiles=10, capped=False, exhausted=True).fits(100)

@@ -124,15 +124,25 @@ def _measured_tier(args: argparse.Namespace) -> quality.Tier | None:
     def run(tier: quality.Tier) -> probe.Reading:
         print(f"measuring {tier.name}", file=sys.stderr)
         report = scratch / f"{tier.name}.json"
-        argv = [*bake_argv(args), "--report-json", str(report)]
+        argv = [*bake_argv(args), "--report-json", str(report), "--stop-when-over-budget"]
         argv[argv.index("--quality") + 1] = tier.name
         argv[argv.index("--build-dir") + 1] = str(scratch / tier.name)
         status = bake.main(argv)
         if not report.is_file():
             return probe.Reading(tier=tier, tiles=quality.CROM_TILES, capped=True)
         data = json.loads(report.read_text())
-        capped = status != 0 or bool(data["dictionary_full"]) or bool(data["budget_exceeded"])
-        return probe.Reading(tier=tier, tiles=int(data["tile_count"]), capped=capped)
+        capped = (
+            status != 0
+            or bool(data["dictionary_full"])
+            or bool(data["budget_exceeded"])
+            or bool(data.get("truncated"))
+        )
+        return probe.Reading(
+            tier=tier,
+            tiles=int(data["tile_count"]),
+            capped=capped,
+            exhausted=bool(data.get("rate_control_exhausted")),
+        )
 
     outcome = probe.search(
         measure=run,
