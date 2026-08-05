@@ -219,7 +219,7 @@ the names do not match.
 |:-----|:-------------|:--------|
 | Calibrate | Samples 24 short windows and measures what the content costs in tiles | Under a minute |
 | Choose | Prints the full ladder and picks the best rung that fits | Instant |
-| Bake | Quantizes, fits palettes, interns every tile, encodes audio | Hours for a feature |
+| Bake | Quantizes, fits palettes, interns every tile, encodes audio | About 8 minutes for a ten minute source, and it scales with runtime |
 | Build | Compiles the player and packs the ROM images | A couple of minutes |
 
 The ladder is printed before the bake starts, because that choice is the one
@@ -402,7 +402,7 @@ is real capacity rather than error.
 
 Every tier is listed whether it fits or not, with the exact overshoot, so
 trimming the source stays a decision made with the numbers in view.
-Calibration takes under a minute where a bake takes hours.
+Calibration runs in about two minutes where the bake it informs takes about eight.
 
 The thirty-five rungs are not an arbitrary subdivision. Colour falls
 geometrically, about 6% off the previous rung each time, so every step is the
@@ -1083,7 +1083,8 @@ no cycles.
 <summary><strong>How long does a bake take?</strong></summary>
 <br>
 
-Hours for a full feature. Calibration takes under a minute, which is why
+About eight minutes for a ten minute source, scaling with runtime. Calibration
+runs in about two minutes, which is why
 [the quality system](#the-quality-system) measures the source first and
 prints every rung with its exact overshoot before anything commits to a bake.
 
