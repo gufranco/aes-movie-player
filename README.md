@@ -715,6 +715,22 @@ crop had been hiding. Excluding it, the residual is a smooth per-level
 difference, the signature of a different digital-to-analog model rather than
 a structural disagreement. Both are emulator-side.
 
+### At the edge of the cartridge
+
+A cartridge that nearly fills the C-ROM is where a structural problem would
+show, and where the search has to be most careful, so it gets its own check.
+
+A five minute source was built to sit there deliberately: grain added at the
+cartridge's own resolution so it survives the downscale, which is what makes a
+tile dictionary work hardest. `--quality search` settled it at `q01` in a
+single bake, measuring 209,667 tiles per minute. Five minutes of that is
+1,048,338 tiles against a ceiling of 1,048,576, so it fit by 238 tiles, and
+the rate controller never came near its ceiling, which is what tells the search
+the rung fit on its own terms rather than by being rescued.
+
+The 150 MB cartridge built from it boots in MAME and draws the picture with
+the grain intact.
+
 ### On real hardware
 
 The cartridge has run on a real AES and on a real MVS, loaded from a NeoSD
