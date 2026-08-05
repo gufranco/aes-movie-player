@@ -17,6 +17,36 @@ env:
   UV_FROZEN: "1"
 
 jobs:
+  commits:
+    name: Commit format
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Every subject is a conventional commit
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9 ./-]+\))?!?: .{1,}$'
+          bad=0
+          while IFS= read -r subject; do
+            [ -z "$subject" ] && continue
+            if ! printf '%s' "$subject" | grep -qE "$pattern"; then
+              echo "not a conventional commit: $subject"
+              bad=1
+            fi
+          done < <(git log --format=%s "$BASE..$HEAD")
+          if [ "$bad" -ne 0 ]; then
+            echo "The release version is derived from these subjects, so the format is load-bearing." >&2
+            exit 1
+          fi
+          echo "every subject parses"
+
   tools:
     name: Baker
     runs-on: ubuntu-24.04

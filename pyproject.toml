@@ -1,0 +1,18 @@
+[tool.semantic_release]
+tag_format = "v{version}"
+version_toml = ["tools/pyproject.toml:project.version"]
+commit_parser = "conventional"
+build_command = ""
+commit_message = "chore(release): {version}"
+allow_zero_version = true
+major_on_zero = false
+
+[tool.semantic_release.changelog]
+exclude_commit_patterns = ["^chore\\(release\\):"]
+default_templates = { changelog_file = "RELEASES.md" }
+
+[tool.semantic_release.branches.main]
+match = "main"
+
+[tool.semantic_release.remote]
+type = "github"

@@ -13,6 +13,7 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.8",
     "mypy>=1.13",
+    "python-semantic-release>=10.6",
 ]
 
 [build-system]
@@ -45,3 +46,4 @@ markers = [
     "reads_real_store: reads the project tier file without writing it",
 ]
 addopts = "-q"
+

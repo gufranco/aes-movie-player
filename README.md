@@ -989,6 +989,7 @@ full measurement is in the [development log](CHANGELOG.md#what-did-not-work).
 | [`tools/scripts/`](tools/scripts) | Capture, verification, timing and ladder-sweep helpers |
 | [`toolchain/`](toolchain) | The ngdevkit build, native or containerised |
 | [`CHANGELOG.md`](CHANGELOG.md) | What was tried, what it measured, and what was rejected |
+| [`RELEASES.md`](RELEASES.md) | Generated release notes, one entry per version |
 | [`aesmovie-tiers.json`](aesmovie-tiers.json) | Tier costs measured by `--quality search`, tracked so they are measured once |
 
 ## Licence
