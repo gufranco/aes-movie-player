@@ -682,6 +682,20 @@ binding constraint, and it does not pay. At thresholds fine enough to be
 imperceptible it collapses 1 to 3% of the dictionary; only signatures coarse
 enough to visibly destroy detail reach 48%. Tiles genuinely differ.
 
+**A richer tier than `q17` on this film.** Every rung is a row of settings
+rather than something to build, and all 34 reachable ones bake, so this was
+only ever a question of which to ship. Baked full length, `q16` fits easily
+at 82% of the C-ROM with the dictionary never full, and returns nothing for
+it: `displayed_error` is identical to six decimals and `mean_error` is 4.9%
+worse, for 12,697 more tiles.
+
+The reason is the rate controller rather than the cartridge. Its multiplier
+is capped at 4096, and `q16` pinned it there while `q17` peaked at 314. The
+richer tier spends faster, the controller ratchets up to compensate, runs out
+of room to tighten, and hands back later exactly what the tier bought early.
+With 18% of the C-ROM still free, the binding constraint at the top of the
+ladder is the controller's ceiling, not character ROM.
+
 **Dithering the source before quantisation.** No measurable effect, because
 the banding comes from the 15 colours a tile may use rather than from the
 15-bit colour word. Dithering inside palette assignment would be the real
@@ -1003,11 +1017,6 @@ capture.
    blend fraction beside the nearest one already precomputed per palette and
    colour. Whether it beats the banding is a question for a person and a full
    bake, since the metric already proved it ranks smearing highest.
-2. **Bake the tier the planner now picks.** Correcting the cost model moved
-   the choice for this film from `q17` to `q16` with no trim, so the
-   editorial question that was blocking this has gone away. The cartridge on
-   disk is still `q17`; reaching `q16` is a fresh bake and then a look at the
-   result, since the metric cannot say whether it is better.
 
 ### Standing rules for this project
 
