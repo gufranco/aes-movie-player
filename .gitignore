@@ -31,3 +31,6 @@ assets/testsuite/
 *.rej
 .DS_Store
 Thumbs.db
+
+# CI scratch
+ci-source.mp4

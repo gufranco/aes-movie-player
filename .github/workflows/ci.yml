@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  tools:
+    name: Baker
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: tools/uv.lock
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Sync
+        run: uv --project tools sync --all-groups
+
+      - name: Format
+        run: uv --project tools run ruff format --check tools/
+
+      - name: Lint
+        run: uv --project tools run ruff check tools/
+
+      - name: Types
+        run: uv --project tools run mypy tools/aesmovie tools/scripts
+
+      - name: Tests
+        run: |
+          uv --project tools run python -m pytest tools/tests \
+            --cov=aesmovie --cov-report=term-missing --cov-fail-under=95
+
+      - name: The committed tier file is not a test artefact
+        run: git diff --exit-code -- aesmovie-tiers.json
+
+  cartridge:
+    name: Cartridge
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: tools/uv.lock
+
+      - name: Install the m68k toolchain and ffmpeg
+        run: |
+          set -euo pipefail
+          retry() {
+            local n=0
+            until "$@"; do
+              n=$((n + 1))
+              [ "$n" -ge 5 ] && return 1
+              echo "retry $n/5: $*" >&2
+              sleep 5
+            done
+          }
+          export DEBIAN_FRONTEND=noninteractive
+          retry sudo apt-get update -q
+          retry sudo apt-get install -y --no-install-recommends \
+            software-properties-common ffmpeg make pkg-config rsync zip binutils
+          retry sudo add-apt-repository -y ppa:dciabrin/ngdevkit
+          retry sudo apt-get update -q
+          retry sudo apt-get install -y --no-install-recommends ngdevkit ngdevkit-gngeo
+          m68k-neogeo-elf-gcc --version | head -1
+
+      - name: Sync
+        run: uv --project tools sync --all-groups
+
+      - name: Make a source
+        run: |
+          ffmpeg -y -loglevel error \
+            -f lavfi -i "testsrc2=size=640x480:rate=24:duration=8" \
+            -f lavfi -i "sine=frequency=440:duration=8" \
+            -pix_fmt yuv420p -c:a aac ci-source.mp4
+
+      - name: Build a cartridge end to end
+        run: |
+          uv --project tools run python -m aesmovie.cartridge ci-source.mp4 \
+            --quality q17 --build-dir build
+
+      - name: The cartridge is real
+        run: |
+          set -euo pipefail
+          test -s build/aesmovie.neo
+          test -s build/aesmovie.zip
+          size=$(wc -c < build/aesmovie.neo)
+          echo "aesmovie.neo is $size bytes"
+          test "$size" -ge 1048576
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cartridge
+          path: |
+            build/aesmovie.neo
+            build/aesmovie.zip
+            build/report.json
+          retention-days: 14
