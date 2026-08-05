@@ -45,7 +45,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--tier-cache",
         type=Path,
         default=None,
-        help="where measured tier costs are kept; defaults to the user cache",
+        help=f"where measured tier costs are kept; defaults to {tiercache.STORE_NAME}",
     )
     parser.add_argument("--start", type=float, default=0.0, help="seconds to skip at the front")
     parser.add_argument(
@@ -54,6 +54,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--build-dir", type=Path, default=Path("build"))
     parser.add_argument("--preview", type=Path, default=None)
     parser.add_argument("--fit", choices=("fill", "letterbox"), default="fill")
+    parser.add_argument(
+        "--dither",
+        action="store_true",
+        help="ordered threshold across palette entries, to break up banding",
+    )
     parser.add_argument(
         "--bake-only", action="store_true", help="stop after the bake, before the ROM build"
     )
@@ -94,6 +99,8 @@ def bake_argv(args: argparse.Namespace) -> list[str]:
         argv += ["--subtitles", str(args.subtitles)]
     if args.preview is not None:
         argv += ["--preview", str(args.preview)]
+    if args.dither:
+        argv += ["--dither"]
     return argv
 
 
@@ -107,6 +114,7 @@ def _measured_tier(args: argparse.Namespace) -> quality.Tier | None:
         start=float(args.start), duration=float(span), fit=args.fit, denoise=0.0, frame_hold=1
     )
     key = tiercache.key_for(args.source, params)
+    tiercache.describe(store, key, source=args.source, params=params)
     known = tiercache.recall(store, key)
     if known:
         print(f"{len(known)} tier cost(s) already measured for this source", file=sys.stderr)
@@ -136,6 +144,8 @@ def _measured_tier(args: argparse.Namespace) -> quality.Tier | None:
     )
     for name, rate in outcome.rates.items():
         tiercache.remember(store, key, name, rate)
+    if outcome.tier is not None:
+        tiercache.describe(store, key, source=args.source, params=params, chosen=outcome.tier.name)
     if outcome.too_expensive:
         print(f"overran: {', '.join(outcome.too_expensive)}", file=sys.stderr)
     if outcome.baked:

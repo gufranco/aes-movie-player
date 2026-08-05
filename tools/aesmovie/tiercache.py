@@ -19,13 +19,20 @@ Widening the window asks a new question and gets a fresh bake.
 
 What is stored per rung is a rate rather than a verdict, so the same
 reading answers both "does this fit" and "by how much".
+
+The file lives at the top of the project rather than in a user cache,
+because what it holds is a property of the film and the ladder rather
+than of one workstation. Committing it lets everyone building the same
+cartridge skip the same bakes. It is written sorted and one field per
+line so a diff reads, and each entry carries the file name and the
+window beside the readings, since a key that is only a hash tells a
+reviewer nothing.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import os
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -33,7 +40,8 @@ from pathlib import Path
 from aesmovie import quality
 
 SAMPLE_BYTES = 1 << 20
-CACHE_VERSION = 2
+CACHE_VERSION = 3
+STORE_NAME = "aesmovie-tiers.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,9 +56,8 @@ class Params:
 
 
 def default_store() -> Path:
-    root = os.environ.get("XDG_CACHE_HOME")
-    base = Path(root) if root else Path.home() / ".cache"
-    return base / "aesmovie" / "tiers.json"
+    """The versionable file at the top of the project."""
+    return Path(__file__).resolve().parents[2] / STORE_NAME
 
 
 def content_digest(source: Path) -> str:
@@ -80,12 +87,23 @@ def key_for(source: Path, params: Params) -> str:
     ).hexdigest()
 
 
-def _read(store: Path) -> dict[str, dict[str, float | None]]:
+def _read(store: Path) -> dict[str, dict[str, object]]:
+    """Every entry in the file, or nothing if it is absent or foreign."""
     try:
         loaded = json.loads(Path(store).read_text())
     except (OSError, ValueError):
         return {}
-    return loaded if isinstance(loaded, dict) else {}
+    if not isinstance(loaded, dict) or loaded.get("version") != CACHE_VERSION:
+        return {}
+    sources = loaded.get("sources")
+    return sources if isinstance(sources, dict) else {}
+
+
+def _write(store: Path, sources: dict[str, dict[str, object]]) -> None:
+    store = Path(store)
+    store.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"version": CACHE_VERSION, "sources": sources}
+    store.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def recall(store: Path, key: str) -> dict[str, float | None]:
@@ -95,17 +113,39 @@ def recall(store: Path, key: str) -> dict[str, float | None]:
     null is a rung that was baked and overran, which is worth keeping so
     it is never baked again.
     """
-    return dict(_read(store).get(key, {}))
+    entry = _read(store).get(key, {})
+    tiers = entry.get("tiers")
+    return dict(tiers) if isinstance(tiers, dict) else {}
 
 
 def remember(store: Path, key: str, tier: str, tiles_per_minute: float | None) -> None:
     """Record one settled rung, leaving the others alone."""
-    store = Path(store)
     known = _read(store)
-    value = None if tiles_per_minute is None else float(tiles_per_minute)
-    known.setdefault(key, {})[tier] = value
-    store.parent.mkdir(parents=True, exist_ok=True)
-    store.write_text(json.dumps(known, indent=2, sort_keys=True))
+    entry = known.setdefault(key, {})
+    tiers = entry.get("tiers")
+    if not isinstance(tiers, dict):
+        tiers = {}
+        entry["tiers"] = tiers
+    tiers[tier] = None if tiles_per_minute is None else float(tiles_per_minute)
+    _write(store, known)
+
+
+def describe(
+    store: Path, key: str, *, source: Path, params: Params, chosen: str | None = None
+) -> None:
+    """Name the entry, so a reviewer reading the file knows what it is about.
+
+    The key is a hash and stays a hash, because the file name is not
+    stable enough to key on. These fields sit beside it for people.
+    """
+    known = _read(store)
+    entry = known.setdefault(key, {})
+    entry["file"] = Path(source).name
+    entry["digest"] = content_digest(Path(source))
+    entry["window"] = asdict(params)
+    if chosen is not None:
+        entry["quality"] = chosen
+    _write(store, known)
 
 
 def settled(rates: Mapping[str, float | None], tier: quality.Tier) -> bool:

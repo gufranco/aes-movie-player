@@ -102,7 +102,56 @@ class TestStoringMeasurements:
         store.write_text("{ this is not json")
         tiercache.remember(store, "abc", "q17", 1.0)
 
-        assert json.loads(store.read_text())["abc"] == {"q17": 1.0}
+        assert tiercache.recall(store, "abc") == {"q17": 1.0}
+
+    def test_a_store_from_another_version_is_ignored_rather_than_misread(self, tmp_path):
+        store = tmp_path / "tiers.json"
+        store.write_text(json.dumps({"version": 1, "sources": {"abc": {"tiers": {"q17": 1.0}}}}))
+
+        assert tiercache.recall(store, "abc") == {}
+
+
+class TestTheFileIsReadable:
+    def test_it_lives_at_the_top_of_the_project(self):
+        store = tiercache.default_store()
+
+        assert store.name == tiercache.STORE_NAME
+        assert (store.parent / "README.md").is_file()
+
+    def test_an_entry_names_the_film_beside_the_readings(self, tmp_path, movie, params):
+        store = tmp_path / "tiers.json"
+        tiercache.remember(store, "abc", "q17", 95_270.0)
+        tiercache.describe(store, "abc", source=movie, params=params, chosen="q17")
+
+        entry = json.loads(store.read_text())["sources"]["abc"]
+
+        assert entry["file"] == "film.mkv"
+        assert entry["quality"] == "q17"
+        assert entry["window"]["duration"] == pytest.approx(600.0)
+        assert entry["tiers"] == {"q17": 95_270.0}
+
+    def test_describing_an_entry_does_not_disturb_its_readings(self, tmp_path, movie, params):
+        store = tmp_path / "tiers.json"
+        tiercache.remember(store, "abc", "q17", 95_270.0)
+        tiercache.describe(store, "abc", source=movie, params=params)
+
+        assert tiercache.recall(store, "abc") == {"q17": 95_270.0}
+
+    def test_readings_land_under_a_described_entry_rather_than_replacing_it(
+        self, tmp_path, movie, params
+    ):
+        store = tmp_path / "tiers.json"
+        tiercache.describe(store, "abc", source=movie, params=params)
+        tiercache.remember(store, "abc", "q17", 95_270.0)
+
+        assert json.loads(store.read_text())["sources"]["abc"]["file"] == "film.mkv"
+        assert tiercache.recall(store, "abc") == {"q17": 95_270.0}
+
+    def test_the_file_ends_with_a_newline_so_a_diff_stays_quiet(self, tmp_path):
+        store = tmp_path / "tiers.json"
+        tiercache.remember(store, "abc", "q17", 1.0)
+
+        assert store.read_text().endswith("}\n")
 
 
 class TestWhatIsSettled:
