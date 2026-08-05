@@ -204,3 +204,50 @@ class TestSecondVoiceRegion:
             + header["v2sz"]
         )
         assert out.read_bytes()[offset : offset + 2] == b"\xf0\x0f"
+
+
+@pytest.fixture
+def rom_dir(tmp_path):
+    return write_regions(
+        tmp_path,
+        p=bytes(range(64)),
+        s=bytes(range(32)),
+        m=bytes(range(16)),
+        v1=bytes(range(8)),
+        c1=bytes([0x11, 0x22, 0x33, 0x44]),
+        c2=bytes([0xAA, 0xBB, 0xCC, 0xDD]),
+    )
+
+
+class TestTheCommandLine:
+    def test_it_writes_the_container_the_build_script_asks_for(self, rom_dir, tmp_path, capsys):
+        output = tmp_path / "out" / "cart.neo"
+
+        code = neofile.main(["--rom-dir", str(rom_dir), "--output", str(output)])
+
+        assert code == 0
+        assert output.is_file()
+        assert str(output) in capsys.readouterr().out
+
+    def test_the_name_reaches_the_header(self, rom_dir, tmp_path):
+        output = tmp_path / "cart.neo"
+
+        neofile.main(
+            ["--rom-dir", str(rom_dir), "--output", str(output), "--name", "SOMETHING ELSE"]
+        )
+
+        assert b"SOMETHING ELSE" in output.read_bytes()[:4096]
+
+    def test_the_ngh_accepts_hexadecimal(self, rom_dir, tmp_path):
+        output = tmp_path / "cart.neo"
+
+        code = neofile.main(["--rom-dir", str(rom_dir), "--output", str(output), "--ngh", "0x1234"])
+
+        assert code == 0
+
+    def test_a_missing_region_stops_it_rather_than_writing_half_a_cart(self, tmp_path):
+        empty = tmp_path / "empty"
+        empty.mkdir()
+
+        with pytest.raises((FileNotFoundError, SystemExit)):
+            neofile.main(["--rom-dir", str(empty), "--output", str(tmp_path / "cart.neo")])

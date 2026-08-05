@@ -171,3 +171,28 @@ class TestRomOffsets:
             if area.get("name") == "sprites":
                 continue
             assert area.find("rom").get("offset") == "0x000000"
+
+
+class TestTheCommandLine:
+    def test_it_writes_the_archive_the_build_script_asks_for(self, rom_dir, tmp_path, capsys):
+        output = tmp_path / "out" / "cart.zip"
+
+        code = mamecart.main(["--rom-dir", str(rom_dir), "--output", str(output)])
+
+        assert code == 0
+        assert output.is_file()
+        assert str(output) in capsys.readouterr().out
+
+    def test_it_names_the_software_list_it_wrote(self, rom_dir, tmp_path, capsys):
+        output = tmp_path / "cart.zip"
+
+        mamecart.main(["--rom-dir", str(rom_dir), "--output", str(output)])
+
+        assert "neogeo.xml" in capsys.readouterr().out
+
+    def test_a_missing_region_stops_it_rather_than_writing_half_a_cart(self, tmp_path):
+        empty = tmp_path / "empty"
+        empty.mkdir()
+
+        with pytest.raises((FileNotFoundError, SystemExit)):
+            mamecart.main(["--rom-dir", str(empty), "--output", str(tmp_path / "cart.zip")])
