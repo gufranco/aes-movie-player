@@ -11,12 +11,13 @@ under a matching name.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
-from aesmovie import bake
+from aesmovie import bake, frames, probe, quality, tiercache
 
 BUILD_SCRIPT = Path(__file__).resolve().parents[2] / "toolchain" / "build-in-docker.sh"
 CARTRIDGE_NAME = "aesmovie.neo"
@@ -35,7 +36,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         help="a SubRip .srt file; defaults to one sitting beside the source",
     )
-    parser.add_argument("--quality", default="auto", help="a tier name such as q17, or auto")
+    parser.add_argument(
+        "--quality",
+        default="auto",
+        help="a tier name such as q17, auto to calibrate, or search to measure by baking",
+    )
+    parser.add_argument(
+        "--tier-cache",
+        type=Path,
+        default=None,
+        help="where measured tier costs are kept; defaults to the user cache",
+    )
     parser.add_argument("--start", type=float, default=0.0, help="seconds to skip at the front")
     parser.add_argument(
         "--duration", type=float, default=None, help="seconds to take; defaults to the whole film"
@@ -86,12 +97,67 @@ def bake_argv(args: argparse.Namespace) -> list[str]:
     return argv
 
 
+def _measured_tier(args: argparse.Namespace) -> quality.Tier | None:
+    """Resolve a tier by baking rather than by sampling, remembering the result."""
+    info = frames.probe(args.source)
+    span = args.duration if args.duration is not None else max(0.0, info.duration - args.start)
+    minutes = span / quality.SECONDS_PER_MINUTE
+    store = args.tier_cache or tiercache.default_store()
+    params = tiercache.Params(
+        start=float(args.start), duration=float(span), fit=args.fit, denoise=0.0, frame_hold=1
+    )
+    key = tiercache.key_for(args.source, params)
+    known = tiercache.recall(store, key)
+    if known:
+        print(f"{len(known)} tier cost(s) already measured for this source", file=sys.stderr)
+
+    scratch = args.build_dir.parent / f"{args.build_dir.name}-probe"
+
+    def run(tier: quality.Tier) -> probe.Reading:
+        print(f"measuring {tier.name}", file=sys.stderr)
+        report = scratch / f"{tier.name}.json"
+        argv = [*bake_argv(args), "--report-json", str(report)]
+        argv[argv.index("--quality") + 1] = tier.name
+        argv[argv.index("--build-dir") + 1] = str(scratch / tier.name)
+        if bake.main(argv) != 0 or not report.is_file():
+            return probe.Reading(tier=tier, tiles=quality.CROM_TILES, capped=True)
+        data = json.loads(report.read_text())
+        return probe.Reading(
+            tier=tier, tiles=int(data["tile_count"]), capped=bool(data["dictionary_full"])
+        )
+
+    outcome = probe.search(
+        measure=run,
+        minutes=minutes,
+        budget=quality.CROM_TILES,
+        known=known,
+        source_fps=float(info.fps),
+        vblank_fps=float(frames.VBLANK_FPS),
+    )
+    for name, rate in outcome.rates.items():
+        tiercache.remember(store, key, name, rate)
+    if outcome.baked:
+        print(f"baked to find out: {', '.join(outcome.baked)}", file=sys.stderr)
+    return outcome.tier
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
     failure = _check_inputs(args)
     if failure is not None:
         return failure
+
+    if args.quality == "search":
+        tier = _measured_tier(args)
+        if tier is None:
+            print(
+                "this source fits no tier; trim it yourself or lower the runtime",
+                file=sys.stderr,
+            )
+            return 3
+        print(f"measured choice: {tier.name}", file=sys.stderr)
+        args.quality = tier.name
 
     print(f"baking {args.source}", file=sys.stderr)
     status = bake.main(bake_argv(args))

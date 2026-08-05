@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import subprocess
+from fractions import Fraction
 
 import pytest
 
-from aesmovie import cartridge
+from aesmovie import cartridge, frames
 
 
 @pytest.fixture
@@ -140,3 +141,41 @@ class TestReporting:
 
         assert "build" in recorded
         assert "aesmovie.neo" in capsys.readouterr().out
+
+
+class TestSearchingForTheTier:
+    def test_search_resolves_to_a_concrete_tier_before_baking(self, movie, recorded, monkeypatch):
+        monkeypatch.setattr(
+            cartridge.probe,
+            "search",
+            lambda **_k: cartridge.probe.Outcome(
+                tier=cartridge.quality.tier_by_name("q19"), minutes=10.0
+            ),
+        )
+        monkeypatch.setattr(cartridge.frames, "probe", lambda *_a, **_k: _stub_info())
+
+        cartridge.main([str(movie), "--quality", "search"])
+
+        argv = recorded["bake"]
+
+        assert argv[argv.index("--quality") + 1] == "q19"
+
+    def test_a_source_that_fits_nowhere_is_refused_rather_than_trimmed(
+        self, movie, recorded, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(
+            cartridge.probe,
+            "search",
+            lambda **_k: cartridge.probe.Outcome(tier=None, minutes=10.0),
+        )
+        monkeypatch.setattr(cartridge.frames, "probe", lambda *_a, **_k: _stub_info())
+
+        code = cartridge.main([str(movie), "--quality", "search"])
+
+        assert code != 0
+        assert "bake" not in recorded
+        assert "fits" in capsys.readouterr().err
+
+
+def _stub_info():
+    return frames.VideoInfo(width=1280, height=720, duration=600.0, fps=Fraction(24, 1))
