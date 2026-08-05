@@ -40,6 +40,7 @@ from aesmovie import (
     quality,
     subtitles,
 )
+from aesmovie import stream as stream_mod
 
 SECONDS_PER_MINUTE: Final = 60.0
 CROM_BANK_BYTES: Final = 128 << 20
@@ -49,6 +50,7 @@ V_ROM_MIN_BYTES: Final = 1 << 19
 MAX_SAMPLE_TILES: Final = 200_000
 _SCENE_CUT_SHARE: Final = 0.6
 
+MOVIE_SYMBOL: Final = "fmv_movie_data"
 PALETTE_WORDS_PER_FRAME: Final = 48
 """How many colour words the player uploads per frame.
 
@@ -181,6 +183,8 @@ _PROFILE_SECONDS: Final = 30.0
 _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 #define MOVIE_DATA_H
 
+#include "fmv.h"
+
 #define MOVIE_FRAME_COUNT {frames}
 #define MOVIE_TILE_COUNT {tiles}
 #define MOVIE_PALETTE_COUNT {palettes}
@@ -219,7 +223,39 @@ extern const unsigned char movie_epochs[];
 extern const unsigned char movie_subtitles[];
 extern const unsigned char movie_fix_palette[];
 
+extern const fmv_movie {movie_symbol};
+
 #endif
+"""
+
+_MOVIE_TEMPLATE: Final = """#include "fmv.h"
+#include "movie_data.h"
+
+const fmv_movie {movie_symbol} = {{
+    .index = movie_index,
+    .keyframes = movie_keyframes,
+    .palettes = movie_palettes,
+    .epochs = movie_epochs,
+    .subtitles = movie_subtitles,
+    .stream_base = {stream_base}u,
+    .frames = {frames}u,
+    .keyframe_count = {keyframes}u,
+    .fps_num = {fps_num}u,
+    .fps_den = {fps_den}u,
+    .audio_page_num = {audio_page_num}u,
+    .audio_page_den = {audio_page_den}u,
+    .epoch_count = {epochs}u,
+    .epoch_palettes = {epoch_palettes}u,
+    .epoch_slice = {epoch_slice}u,
+    .palette_base = {base_bank}u,
+    .first_sprite = {first_sprite}u,
+    .grid_cols = {cols}u,
+    .grid_rows = {rows}u,
+    .max_updates = {max_updates}u,
+    .subtitle_count = {subtitle_count}u,
+    .subtitle_columns = {subtitle_columns}u,
+    .subtitle_lines = {subtitle_lines}u,
+}};
 """
 
 _ASM_ENTRY: Final = """    .globl {symbol}
@@ -382,44 +418,49 @@ def _write_sources(
         body += _ASM_ENTRY.format(symbol=symbol, path=outcome_paths[key].name)
     asm.write_text(body)
 
+    fields = {
+        "frames": result.stats.frames,
+        "tiles": result.stats.tile_count,
+        "palettes": len(result.palette_set),
+        "epochs": len(result.palette_sets),
+        "epoch_palettes": len(result.palette_sets[0]),
+        "epoch_slice": PALETTE_WORDS_PER_FRAME,
+        "image_width": encode.FRAME_WIDTH,
+        "image_height": encode.FRAME_HEIGHT,
+        "tier_name": self_tier_name(request),
+        "chroma_percent": round(request.chroma_weight * 100),
+        "crom_percent": round(100 * result.stats.crom_payload_bytes / CROM_BANK_BYTES),
+        "audio_hz": round(audio_hz),
+        "frame_hold": request.frame_hold,
+        "base_bank": result.palette_set.base_bank,
+        "keyframes": result.stats.keyframe_count,
+        "cols": encode.GRID_COLS,
+        "rows": encode.GRID_ROWS,
+        "max_updates": result.stats.max_updates,
+        "stream_banks": result.stream.bank_count(),
+        "stream_bytes": result.stats.stream_bytes,
+        "fps_num": frames.VBLANK_FPS.numerator,
+        "fps_den": frames.VBLANK_FPS.denominator,
+        "fix_palette": FIX_PALETTE_BANK,
+        "fix_defines": _fix_defines(),
+        "audio_page_num": audio_pages.numerator,
+        "audio_page_den": audio_pages.denominator or 1,
+        "subtitle_count": (
+            outcome_paths["subtitles"].stat().st_size // subtitles.RECORD_BYTES
+            if "subtitles" in outcome_paths
+            else 0
+        ),
+        "subtitle_columns": subtitles.COLUMNS,
+        "subtitle_lines": subtitles.MAX_LINES,
+        "movie_symbol": MOVIE_SYMBOL,
+        "first_sprite": stream_mod.FIRST_SPRITE,
+        "stream_base": 0,
+    }
+
     header = generated / "movie_data.h"
-    header.write_text(
-        _HEADER_TEMPLATE.format(
-            frames=result.stats.frames,
-            tiles=result.stats.tile_count,
-            palettes=len(result.palette_set),
-            epochs=len(result.palette_sets),
-            epoch_palettes=len(result.palette_sets[0]),
-            epoch_slice=PALETTE_WORDS_PER_FRAME,
-            image_width=encode.FRAME_WIDTH,
-            image_height=encode.FRAME_HEIGHT,
-            tier_name=self_tier_name(request),
-            chroma_percent=round(request.chroma_weight * 100),
-            crom_percent=round(100 * result.stats.crom_payload_bytes / CROM_BANK_BYTES),
-            audio_hz=round(audio_hz),
-            frame_hold=request.frame_hold,
-            base_bank=result.palette_set.base_bank,
-            keyframes=result.stats.keyframe_count,
-            cols=encode.GRID_COLS,
-            rows=encode.GRID_ROWS,
-            max_updates=result.stats.max_updates,
-            stream_banks=result.stream.bank_count(),
-            stream_bytes=result.stats.stream_bytes,
-            fps_num=frames.VBLANK_FPS.numerator,
-            fps_den=frames.VBLANK_FPS.denominator,
-            fix_palette=FIX_PALETTE_BANK,
-            fix_defines=_fix_defines(),
-            audio_page_num=audio_pages.numerator,
-            audio_page_den=audio_pages.denominator or 1,
-            subtitle_count=(
-                outcome_paths["subtitles"].stat().st_size // subtitles.RECORD_BYTES
-                if "subtitles" in outcome_paths
-                else 0
-            ),
-            subtitle_columns=subtitles.COLUMNS,
-            subtitle_lines=subtitles.MAX_LINES,
-        )
-    )
+    header.write_text(_HEADER_TEMPLATE.format(**fields))
+    movie = generated / "movie_data_value.c"
+    movie.write_text(_MOVIE_TEMPLATE.format(**fields))
     return asm, header
 
 

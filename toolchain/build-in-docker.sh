@@ -71,25 +71,29 @@ CFLAGS=(
     "${NGDEVKIT_CFLAGS[@]}"
     -Isrc
     -I"$GENERATED"
-    -I"$BAKED"
+    -Isrc/fmv -Isrc/player -I"$BAKED"
     -std=c99 -fomit-frame-pointer -O2 -g
     -Wall -Wextra -Werror
 )
 
-for unit in main menu timeline; do
+for unit in fmv/fmv fmv/fmv_audio fmv/timeline player/main player/menu; do
+    name="$(basename "$unit")"
     echo "CC src/$unit.c"
-    retry_build m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "src/$unit.c" -o "$BUILD/$unit.o"
+    retry_build m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "src/$unit.c" -o "$BUILD/$name.o"
 done
+echo "CC $GENERATED/movie_data_value.c"
+retry_build m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "$GENERATED/movie_data_value.c" \
+    -o "$BUILD/movie_data_value.o"
 
 echo "CHECK VRAM write spacing"
 python3 tools/scripts/check_vram_timing.py "$BUILD/main.o" "$BUILD/menu.o" \
-    "$BUILD/timeline.o"
+    "$BUILD/fmv.o" "$BUILD/timeline.o"
 
 echo "AS $GENERATED/movie_data.S"
 retry_build m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "$GENERATED/movie_data.S" -o "$BUILD/movie_data.o"
 
 echo "LD $BUILD/rom.elf"
-retry_build m68k-neogeo-elf-gcc -o "$BUILD/rom.elf" "$BUILD/main.o" "$BUILD/menu.o" "$BUILD/timeline.o" "$BUILD/movie_data.o" \
+retry_build m68k-neogeo-elf-gcc -o "$BUILD/rom.elf" "$BUILD/main.o" "$BUILD/menu.o" "$BUILD/fmv.o" "$BUILD/fmv_audio.o" "$BUILD/timeline.o" "$BUILD/movie_data_value.o" "$BUILD/movie_data.o" \
     -Wl,-Map="$BUILD/rom.map" "${NGDEVKIT_LIBS[@]}"
 
 echo "[ram] section sizes:"
@@ -117,8 +121,8 @@ cat "$BAKED/stream.bin" >> "$ROM/p1.p1"
 dd if="$ROM/p1.p1" of="$ROM/p1.p1" conv=notrunc,swab status=none
 
 if [[ -f "$GENERATED/audio_params.s" ]]; then
-    echo "AS src/sound.s"
-    z80-neogeo-ihx-sdasz80 -o "$BUILD/sound.rel" src/sound.s
+    echo "AS src/fmv/sound.s"
+    z80-neogeo-ihx-sdasz80 -o "$BUILD/sound.rel" src/fmv/sound.s
     z80-neogeo-ihx-sdldz80 -n -i "$BUILD/sound.ihx" "$BUILD/sound.rel"
     z80-neogeo-ihx-sdobjcopy -I ihex -O binary "$BUILD/sound.ihx" "$ROM/m1.m1" --pad-to 131072
 else

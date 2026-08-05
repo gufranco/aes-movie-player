@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-SOURCE = Path(__file__).resolve().parents[2] / "src" / "timeline.c"
+SOURCE = Path(__file__).resolve().parents[2] / "src" / "fmv" / "timeline.c"
 FPS_NUM = 24
 FPS_DEN = 1
 SUBTITLE_STRIDE = 8 + 40 * 2
