@@ -8,7 +8,7 @@ And a library that puts one inside your own game.</strong>
 <br>
 
 [![Licence](https://img.shields.io/badge/licence-GPL--3.0-blue?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-860%20passing-brightgreen?style=flat-square)](tools/tests)
+[![Tests](https://img.shields.io/badge/tests-902%20passing-brightgreen?style=flat-square)](tools/tests)
 [![Hardware](https://img.shields.io/badge/runs%20on-real%20AES%20%2B%20MVS-success?style=flat-square)](#on-real-hardware)
 [![Target](https://img.shields.io/badge/target-Neo%20Geo%20AES-red?style=flat-square)](#hardware-ceilings)
 [![Verified](https://img.shields.io/badge/verified-geolith%20%2B%20MAME-blueviolet?style=flat-square)](#verification)
@@ -27,7 +27,7 @@ And a library that puts one inside your own game.</strong>
 
 <div align="center">
 
-**158 MB** cartridge · **35,274** frames · **59.2** fps · **846,784** tiles · **81%** of the C-ROM ceiling · **711** tests
+**158 MB** cartridge · **35,274** frames · **59.2** fps · **846,784** tiles · **81%** of the C-ROM ceiling · **902** tests
 
 <br>
 
