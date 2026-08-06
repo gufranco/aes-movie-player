@@ -8,6 +8,8 @@ was paid for once and does not need paying for again.
 
 ## Contents
 
+- [Three registers that cannot be read](#three-registers-that-cannot-be-read)
+- [A verification gate that was guessing](#a-verification-gate-that-was-guessing)
 - [One ladder cannot price every film](#one-ladder-cannot-price-every-film)
 - [The ladder is a frontier, and now it is checked](#the-ladder-is-a-frontier-and-now-it-is-checked)
 - [What did not work](#what-did-not-work)
@@ -15,6 +17,64 @@ was paid for once and does not need paying for again.
 - [It plays on a board](#it-plays-on-a-board)
 - [What is left](#what-is-left)
 - [Standing rules for this project](#standing-rules-for-this-project)
+
+## Three registers that cannot be read
+
+Splitting the renderer into a library meant it had to give the machine back,
+so `fmv_open` saved the LSPC mode, the fix-source latch and the palette-bank
+latch, and `fmv_close` wrote them back. That is the obvious shape and it is
+wrong: none of the three can be read.
+
+| Register | What a read returns |
+|---|---|
+| `0x3A001B` fix source, `0x3A001F` palette bank | MAME maps the whole `0x3A0000` range to a handler documented as returning the last word on the bus, "almost always the opcode of the next instruction due to prefetch". geolith has no read case for the range at all |
+| `0x3C0006` LSPC mode | The raster line counter. geolith's own comment gives the layout: line counter in bits 15 to 7, the 60/50 Hz flag in bit 3, the auto-animation counter in bits 2 to 0 |
+
+So every movie was writing a prefetched opcode into two latches on its way
+out, and a raster-derived word into the register whose high byte is the
+auto-animation speed. A caller that never touched those registers still got
+them scrambled, which is worse than not restoring them at all.
+
+The fix is to stop pretending. The four values live in `fmv_options` now,
+defaulted to what a plain cartridge uses, and `fmv_close` writes what the
+caller declared. The requirement changed with it: the library restores the
+state you name, not the state it found.
+
+What made this findable was building the acceptance test rather than the
+feature. The host tests that came out of it model the latches the way the
+board does, with no read path at all, so the original code no longer
+compiles against them:
+
+```
+fmv.c:217:23: error: use of undeclared identifier 'REG_CRTFIX'
+```
+
+A stub that let a read succeed would have let the defect pass.
+
+## A verification gate that was guessing
+
+The MAME check returned 1.5658, 1.5929, 1.5696 and 27.8718 on four
+consecutive runs of a cartridge that had not changed. The last one is a
+failure, and any of them would have been reported as the number.
+
+Two separate causes, one found and one only cornered.
+
+The matcher took the best-scoring frame by `argmin` and reported it with no
+measure of how much better it was than the next. A movie repeats each source
+frame about two and a half times and holds still for long stretches, so
+several frames score within noise of each other. `measure_drift.py` already
+carried a guard for exactly this; the tool the build gate runs did not. It
+now sets aside the run of identically scoring frames around the best, finds
+the closest genuine rival, and refuses rather than choosing when the margin
+is under `--min-separation`. On the reference clip the match wins by 7.83 of
+255.
+
+The capture itself was also varying. Giving MAME a real render target with
+`-window -nomaximize` stopped it, and twenty-odd consecutive runs have agreed
+since, against four different readings in four before. That is evidence, not
+a mechanism, and it is recorded as such: the emulation is deterministic, so
+what varied was which rendered frame reached the snapshot, and no reading of
+MAME's source has been done to confirm it.
 
 ## One ladder cannot price every film
 

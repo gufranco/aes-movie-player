@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import struct
 import subprocess
 import subprocess as sp
 from pathlib import Path
@@ -215,6 +216,75 @@ class TestSeparation:
         code = self.run_main(capture, preview, min_separation=1.0)
 
         assert code == 0
+
+
+class TestGuardsOnTheInputs:
+    def run_main(self, capture: Path, **kwargs) -> int:
+        argv = ["--capture", str(capture)]
+        for key, value in kwargs.items():
+            argv += [f"--{key.replace('_', '-')}", str(value)]
+        return verify_capture.main(argv)
+
+    def test_a_reference_with_no_frames_at_all_is_refused(self, rendered, tmp_path, capsys):
+        frames, _, directory = rendered
+        capture = directory / "empty-reference.png"
+        write_png(capture, frames[0][:, OVERSCAN : WIDTH - OVERSCAN])
+        empty = tmp_path / "empty.mkv"
+        empty.write_bytes(b"")
+
+        code = self.run_main(capture, preview=empty)
+
+        assert code == 2
+        assert "no frames" in capsys.readouterr().err
+
+    def test_naming_neither_a_preview_nor_a_bake_is_refused(self, rendered):
+        _, _, directory = rendered
+
+        with pytest.raises(SystemExit):
+            verify_capture.main(["--capture", str(directory / "shot.png")])
+
+    def test_naming_a_bake_without_a_frame_is_refused(self, rendered, tmp_path):
+        _, _, directory = rendered
+
+        with pytest.raises(SystemExit):
+            verify_capture.main(
+                ["--capture", str(directory / "shot.png"), "--baked", str(tmp_path)]
+            )
+
+    def test_a_frame_outside_the_movie_is_refused(self, tmp_path):
+        baked = tmp_path / "baked"
+        baked.mkdir()
+        (baked / "stream.bin").write_bytes(b"")
+        (baked / "index.bin").write_bytes(struct.pack(">I", 0))
+
+        with pytest.raises(ValueError, match="outside the 1 frame movie"):
+            verify_capture.reconstruct_frame(baked, 5)
+
+    def test_a_bake_with_no_epoch_table_keeps_the_whole_palette(self, tmp_path):
+        colors = np.arange(64, dtype=np.uint16).reshape(4, 16)
+
+        epoch, kept = verify_capture._epoch_palettes(tmp_path, 0, colors)
+
+        assert epoch == 0
+        assert np.array_equal(kept, colors)
+
+    def test_a_single_epoch_keeps_the_whole_palette(self, tmp_path):
+        (tmp_path / "epochs.bin").write_bytes(struct.pack(">I", 0))
+        colors = np.arange(64, dtype=np.uint16).reshape(4, 16)
+
+        epoch, kept = verify_capture._epoch_palettes(tmp_path, 0, colors)
+
+        assert epoch == 0
+        assert np.array_equal(kept, colors)
+
+    def test_a_later_epoch_takes_its_own_slice(self, tmp_path):
+        (tmp_path / "epochs.bin").write_bytes(struct.pack(">II", 0, 10))
+        colors = np.arange(64, dtype=np.uint16).reshape(4, 16)
+
+        epoch, kept = verify_capture._epoch_palettes(tmp_path, 12, colors)
+
+        assert epoch == 1
+        assert np.array_equal(kept, colors[2:])
 
 
 class TestUpscaledCaptures:
