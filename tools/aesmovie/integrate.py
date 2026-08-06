@@ -37,20 +37,22 @@ STOCK_CARTRIDGE_ASSETS: Final = (
 )
 
 
-def cartridge_edits(text: str, crom_bytes: int) -> str:
+def cartridge_edits(text: str) -> str:
     """Declare the second program ROM and widen the sprite ROM.
 
     A stock template leaves the second program ROM commented out and
-    sizes the sprite ROM for a demo logo. A movie needs both.
+    sizes the sprite ROM for a demo logo. A movie needs both, and the
+    size comes from the fragment rather than from anyone measuring a
+    file, so a re-bake carries its own new size with it.
     """
     if STOCK_PROM2 not in text or STOCK_CROM_SIZE not in text:
         msg = "the stock rom.mk no longer looks the way the guide describes"
         raise SystemExit(msg)
     text = text.replace(STOCK_PROM2, "PROM2=$(ROM)/$(GAMEROM)-p2.p2")
-    return text.replace(STOCK_CROM_SIZE, f"CROMSIZE={crom_bytes}")
+    return text.replace(STOCK_CROM_SIZE, "CROMSIZE=$(FMV_CROM_BYTES)")
 
 
-def makefile_edits(text: str, prom2_bytes: int) -> str:
+def makefile_edits(text: str) -> str:
     """Include the fragment and point the cartridge at the movie.
 
     The include sits between the cartridge declaration and the build
@@ -69,7 +71,7 @@ def makefile_edits(text: str, prom2_bytes: int) -> str:
 
     added = f"""FMV_GAME_OBJS = $(BUILDDIR)/main.o
 FMV_AUDIO = no
-PROM2SIZE = {prom2_bytes}
+PROM2SIZE = $(FMV_PROM2_BYTES)
 CFLAGS += $(FMV_CFLAGS)
 LDFLAGS += $(FMV_LDFLAGS)
 include fmv/fmv.mk
@@ -85,16 +87,16 @@ include fmv/fmv.mk
     return text
 
 
-def apply(project: Path, *, crom_bytes: int, prom2_bytes: int) -> None:
+def apply(project: Path) -> None:
     """Rewrite a stock project's two editable files in place."""
     cartridge = project / "rom.mk"
-    cartridge.write_text(cartridge_edits(cartridge.read_text(), crom_bytes))
+    cartridge.write_text(cartridge_edits(cartridge.read_text()))
     makefile = project / "Makefile"
-    makefile.write_text(makefile_edits(makefile.read_text(), prom2_bytes))
+    makefile.write_text(makefile_edits(makefile.read_text()))
 
 
 def main(argv: list[str]) -> int:
-    apply(Path(argv[0]), crom_bytes=int(argv[1]), prom2_bytes=int(argv[2]))
+    apply(Path(argv[0]))
     return 0
 
 

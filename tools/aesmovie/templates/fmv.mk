@@ -27,6 +27,20 @@ FMV_AUDIO ?= {audio}
 FMV_STREAM_BANKS = {stream_banks}
 FMV_BANK_NUMBERS = {bank_numbers}
 
+# Sizes the cartridge declaration needs, measured by the bake so nothing
+# here has to be worked out by hand.
+#
+# FMV_CROM_BYTES already leaves room for your own tiles: the sprite ROM
+# has to be a power of two, and the movie's dictionary rarely lands on
+# one. FMV_FREE_TILES is how many slots that slack is worth.
+FMV_TOTAL_BANKS = $(shell expr $(FMV_FIRST_BANK) + $(FMV_STREAM_BANKS))
+FMV_ALL_BANK_NUMBERS = $(shell seq 0 $(shell expr $(FMV_TOTAL_BANKS) - 1))
+FMV_PROM2_BYTES = $(shell expr $(FMV_TOTAL_BANKS) \* 1048576)
+FMV_CROM_BYTES = {crom_size}
+FMV_CROM_DICTIONARY_BYTES = {crom_payload}
+FMV_FIRST_FREE_TILE = {tile_count}
+FMV_FREE_TILES = {free_tiles}
+
 FMV_CFLAGS = -I$(FMV_SRC) -I$(FMV_MOVIE)
 FMV_LDFLAGS = -Wl,--defsym=fmv_stream_base=$(shell expr $(FMV_FIRST_BANK) \* 1048576)
 
@@ -67,11 +81,19 @@ $(BUILDDIR)/$(FMV_MOVIE)/fmv_stream__bank%.o: $(FMV_MOVIE)/fmv_stream__bank%.S
 # Set FMV_GAME_OBJS to your own objects before this file is included and
 # the rules below are declared for you. Leave it empty and declare the
 # ELF and PROM2 dependencies yourself.
+#
+# The second program ROM is the concatenation of its banks in the order
+# they are named, so every bank below FMV_FIRST_BANK is named here too
+# even though this file supplies no rule for one. That is what keeps a
+# bank you own from landing at the wrong offset. Give each of yours a
+# rule of the form
+#
+#     $(PROM2)_bank0: $(BUILDDIR)/my-banked-code.elf
 ifneq ($(FMV_GAME_OBJS),)
 $(foreach bank,$(FMV_BANK_NUMBERS),\
   $(eval $(BUILDDIR)/rom-fmv-bank$(bank).elf: $(FMV_GAME_OBJS) $(FMV_OBJS) \
     $(BUILDDIR)/$(FMV_MOVIE)/fmv_stream__bank$(bank).o)\
   $(eval $(PROM2)_bank$(shell expr $(FMV_FIRST_BANK) + $(bank)): \
-    $(BUILDDIR)/rom-fmv-bank$(bank).elf)\
-  $(eval $(PROM2): $(PROM2)_bank$(shell expr $(FMV_FIRST_BANK) + $(bank))))
+    $(BUILDDIR)/rom-fmv-bank$(bank).elf))
+$(foreach bank,$(FMV_ALL_BANK_NUMBERS),$(eval $(PROM2): $(PROM2)_bank$(bank)))
 endif

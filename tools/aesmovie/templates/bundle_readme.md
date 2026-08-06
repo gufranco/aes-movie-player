@@ -33,22 +33,44 @@ include build.mk
 FMV_GAME_OBJS = $(BUILDDIR)/main.o
 CFLAGS += $(FMV_CFLAGS)
 LDFLAGS += $(FMV_LDFLAGS)
-PROM2SIZE = {prom2_size}
+PROM2SIZE = $(FMV_PROM2_BYTES)
 ```
 
 With `FMV_GAME_OBJS` set, the fragment declares one ELF per switchable
 bank and wires each to its slice of the second program ROM. Leave it
 empty to declare those yourself.
 
-**4. Point the cartridge at the movie's ROM images.** The fragment
-exports `$(FMV_MOVIE)` for exactly this, so the paths hold whatever you
-named the folder:
+If your own code lives in a switchable bank, raise `FMV_FIRST_BANK` past
+it and give your bank a rule. The fragment names every bank in order, so
+yours lands where you put it and the ROM grows to fit:
 
 ```make
-$(CROM1): $(FMV_MOVIE)/c1.bin
-$(CROM2): $(FMV_MOVIE)/c2.bin
+FMV_FIRST_BANK = 1
+$(PROM2)_bank0: $(BUILDDIR)/my-banked-code.elf
+```
+
+**4. Point the cartridge at the movie's ROM images,** and list your own
+sprite tiles after them. The sprite ROM is a flat array of tiles, so
+naming both in order is the whole merge: ngdevkit's own rule
+concatenates the prerequisites and pads to `CROMSIZE`.
+
+```make
+CROMSIZE = $(FMV_CROM_BYTES)
+$(CROM1): $(FMV_MOVIE)/c1.bin $(BUILDDIR)/assets/my-tiles.c1
+$(CROM2): $(FMV_MOVIE)/c2.bin $(BUILDDIR)/assets/my-tiles.c2
 $(SROM1): $(FMV_MOVIE)/fix.s1
 ```
+
+**Your first tile is `MOVIE_TILE_COUNT`,** which the generated header
+gives you, and the fragment repeats as `$(FMV_FIRST_FREE_TILE)`. The
+movie's dictionary is shipped at exactly its own length with no padding,
+so your tiles start immediately after it rather than after a gap.
+
+`$(FMV_CROM_BYTES)` already has room in it. A sprite ROM must be a power
+of two and a dictionary rarely lands on one, so the slack is yours:
+this movie leaves **{free_tiles}** free slots inside the size it already
+needs. Going past that doubles the sprite ROM, which is allowed but
+worth knowing before it happens.
 
 **5. Call it.** Four lines in your own source:
 
@@ -106,7 +128,7 @@ options.skip_user = &state;
 |---|---|---|
 | Sprites | {first_sprite} to {last_sprite} | Everything else. Move them with `options.first_sprite` |
 | Palette banks | {palette_base} upward | Below {palette_base}. Fixed at bake time, not a runtime option |
-| C-ROM tiles | 0 to {last_tile} | {tile_count} upward. Pack your own tiles after the movie's |
+| C-ROM tiles | 0 to {last_tile} | {tile_count} upward, {free_tiles} of them inside the ROM size the movie already needs |
 | P-ROM banks | {stream_banks}, starting at `FMV_FIRST_BANK` | The other banks, and the whole fixed megabyte |
 | Fix layer | Nothing | All of it. The library draws no text |
 | LSPC mode, fix source, palette bank, bank latch | Set while the movie runs, put back on close | Yours, but you have to declare them. See below |

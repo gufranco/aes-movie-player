@@ -145,6 +145,15 @@ class TileDictionary:
             key = self._digest(head[position].tobytes(), tail[position].tobytes())
             self._lookup.setdefault(key, (index << _INDEX_SHIFT) | flags)
 
+    def payload_bytes(self) -> int:
+        """Length of the dictionary itself, before any padding.
+
+        A C-ROM is a flat array of tiles, so a caller appending its own
+        after the movie's writes them at this offset and its first tile
+        takes the number this dictionary stops at.
+        """
+        return self._count * crom.TILE_BYTES_PER_ROM
+
     def rom_images(self, *, pad_to: int | None = None) -> tuple[bytes, bytes]:
         """The two C-ROM halves, padded to their final size."""
         target = crom.rom_size_for(self._count) if pad_to is None else pad_to

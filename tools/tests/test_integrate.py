@@ -34,50 +34,50 @@ $(MROM1): $(SOUND_DRIVER)
 
 class TestCartridgeDeclaration:
     def test_it_declares_the_second_program_rom(self):
-        text = integrate.cartridge_edits(STOCK_ROM_MK, 4194304)
+        text = integrate.cartridge_edits(STOCK_ROM_MK)
 
         assert "PROM2=$(ROM)/$(GAMEROM)-p2.p2" in text
         assert "# PROM2=" not in text
 
-    def test_it_widens_the_sprite_rom_to_hold_the_movie(self):
-        text = integrate.cartridge_edits(STOCK_ROM_MK, 4194304)
+    def test_it_sizes_the_sprite_rom_from_the_fragment(self):
+        text = integrate.cartridge_edits(STOCK_ROM_MK)
 
-        assert "CROMSIZE=4194304" in text
+        assert "CROMSIZE=$(FMV_CROM_BYTES)" in text
 
     def test_it_leaves_the_rest_of_the_declaration_alone(self):
-        text = integrate.cartridge_edits(STOCK_ROM_MK, 4194304)
+        text = integrate.cartridge_edits(STOCK_ROM_MK)
 
         assert "PROMSIZE=1048576" in text
         assert "SROMSIZE=131072" in text
 
     def test_a_declaration_the_guide_does_not_recognise_is_an_error(self):
         with pytest.raises(SystemExit):
-            integrate.cartridge_edits("PROMSIZE=1048576\n", 4194304)
+            integrate.cartridge_edits("PROMSIZE=1048576\n")
 
 
 class TestMakefile:
     def test_the_fragment_is_included_before_the_build_rules(self):
-        text = integrate.makefile_edits(STOCK_MAKEFILE, 1048576)
+        text = integrate.makefile_edits(STOCK_MAKEFILE)
 
         assert text.index("include fmv/fmv.mk") < text.index("include build.mk")
 
     def test_the_fragment_is_included_after_the_cartridge_declaration(self):
-        text = integrate.makefile_edits(STOCK_MAKEFILE, 1048576)
+        text = integrate.makefile_edits(STOCK_MAKEFILE)
 
         assert text.index("include rom.mk") < text.index("include fmv/fmv.mk")
 
     def test_it_names_the_projects_own_objects_before_the_include(self):
-        text = integrate.makefile_edits(STOCK_MAKEFILE, 1048576)
+        text = integrate.makefile_edits(STOCK_MAKEFILE)
 
         assert text.index("FMV_GAME_OBJS") < text.index("include fmv/fmv.mk")
 
-    def test_it_sizes_the_second_program_rom_for_the_stream(self):
-        text = integrate.makefile_edits(STOCK_MAKEFILE, 2097152)
+    def test_it_sizes_the_second_program_rom_from_the_fragment(self):
+        text = integrate.makefile_edits(STOCK_MAKEFILE)
 
-        assert "PROM2SIZE = 2097152" in text
+        assert "PROM2SIZE = $(FMV_PROM2_BYTES)" in text
 
     def test_it_points_the_cartridge_at_the_movies_rom_images(self):
-        text = integrate.makefile_edits(STOCK_MAKEFILE, 1048576)
+        text = integrate.makefile_edits(STOCK_MAKEFILE)
 
         for line in (
             "$(CROM1): $(FMV_MOVIE)/c1.bin",
@@ -87,33 +87,33 @@ class TestMakefile:
             assert line in text, line
 
     def test_it_builds_the_program_rom_from_the_first_bank_elf(self):
-        text = integrate.makefile_edits(STOCK_MAKEFILE, 1048576)
+        text = integrate.makefile_edits(STOCK_MAKEFILE)
 
         assert "$(PROM1): $(BUILDDIR)/rom-fmv-bank0.elf" in text
 
     def test_it_asks_for_a_video_only_build(self):
-        text = integrate.makefile_edits(STOCK_MAKEFILE, 1048576)
+        text = integrate.makefile_edits(STOCK_MAKEFILE)
 
         assert "FMV_AUDIO = no" in text
 
     def test_a_makefile_without_the_build_rules_is_an_error(self):
         with pytest.raises(SystemExit):
-            integrate.makefile_edits("include rom.mk\n", 1048576)
+            integrate.makefile_edits("include rom.mk\n")
 
     def test_the_stock_program_rom_wiring_is_replaced_not_added_to(self):
-        text = integrate.makefile_edits(STOCK_MAKEFILE, 1048576)
+        text = integrate.makefile_edits(STOCK_MAKEFILE)
 
         assert "$(PROM1): $(ELF)" not in text
         assert "ELF=$(BUILDDIR)/rom.elf" not in text
 
     def test_the_demo_assets_stop_being_prerequisites(self):
-        text = integrate.makefile_edits(STOCK_MAKEFILE, 1048576)
+        text = integrate.makefile_edits(STOCK_MAKEFILE)
 
         assert "base-crom-logo" not in text
         assert "base-srom-text-shadow" not in text
 
     def test_the_sound_driver_comes_from_ngdevkit(self):
-        text = integrate.makefile_edits(STOCK_MAKEFILE, 1048576)
+        text = integrate.makefile_edits(STOCK_MAKEFILE)
 
         assert "SOUND_DRIVER=$(NGSHAREDIR)/nullsound_driver.ihx" in text
 
@@ -125,10 +125,10 @@ class TestMakefile:
         )
 
         with pytest.raises(SystemExit):
-            integrate.makefile_edits(stripped, 1048576)
+            integrate.makefile_edits(stripped)
 
     def test_it_edits_nothing_the_baker_emitted(self):
-        text = integrate.makefile_edits(STOCK_MAKEFILE, 1048576)
+        text = integrate.makefile_edits(STOCK_MAKEFILE)
 
         assert "fmv/movie/" not in text
         assert "fmv/src/" not in text
@@ -143,23 +143,23 @@ class TestApplyingToAProject:
     def test_it_rewrites_both_editable_files(self, tmp_path):
         project = self._project(tmp_path)
 
-        integrate.apply(project, crom_bytes=4194304, prom2_bytes=1048576)
+        integrate.apply(project)
 
-        assert "CROMSIZE=4194304" in (project / "rom.mk").read_text()
+        assert "CROMSIZE=$(FMV_CROM_BYTES)" in (project / "rom.mk").read_text()
         assert "include fmv/fmv.mk" in (project / "Makefile").read_text()
 
     def test_it_leaves_every_other_file_alone(self, tmp_path):
         project = self._project(tmp_path)
         (project / "build.mk").write_text("untouched\n")
 
-        integrate.apply(project, crom_bytes=4194304, prom2_bytes=1048576)
+        integrate.apply(project)
 
         assert (project / "build.mk").read_text() == "untouched\n"
 
     def test_the_command_line_applies_the_same_edits(self, tmp_path):
         project = self._project(tmp_path)
 
-        code = integrate.main([str(project), "4194304", "1048576"])
+        code = integrate.main([str(project)])
 
         assert code == 0
-        assert "PROM2SIZE = 1048576" in (project / "Makefile").read_text()
+        assert "PROM2SIZE = $(FMV_PROM2_BYTES)" in (project / "Makefile").read_text()

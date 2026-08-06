@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from aesmovie import adpcmb, bake, bundle, content, quality, stream
+from aesmovie import adpcmb, bake, bundle, content, crom, quality, stream
 from aesmovie import frames as frames_mod
 from aesmovie import subtitles as subtitles_mod
 
@@ -184,10 +184,22 @@ class TestArtifacts:
 
         assert c1 == c2
 
-    def test_the_c_rom_size_is_a_power_of_two(self, baked):
+    def test_the_dictionary_is_written_at_its_own_length(self, baked):
         size = (baked.build_dir / "baked" / "c1.bin").stat().st_size
 
+        assert size == baked.result.stats.tile_count * crom.TILE_BYTES_PER_ROM
+
+    def test_it_carries_no_padding_a_caller_would_have_to_skip(self, baked):
+        size = (baked.build_dir / "baked" / "c1.bin").stat().st_size
+
+        assert size % crom.TILE_BYTES_PER_ROM == 0
+        assert size // crom.TILE_BYTES_PER_ROM == baked.result.stats.tile_count
+
+    def test_the_cartridge_size_it_reports_is_a_power_of_two(self, baked):
+        size = crom.rom_size_for(baked.result.stats.tile_count)
+
         assert size & (size - 1) == 0
+        assert size >= (baked.build_dir / "baked" / "c1.bin").stat().st_size
 
     def test_it_writes_the_command_stream(self, baked):
         path = baked.build_dir / "baked" / "stream.bin"

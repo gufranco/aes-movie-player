@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from aesmovie import crom
 from aesmovie import stream as stream_mod
 
 LIBRARY_DIR_NAME: Final = "src"
@@ -101,6 +102,8 @@ def write_bundle(
     max_updates: int,
     tick_cycles: int,
     tile_count: int,
+    crom_payload: int,
+    crom_size: int,
     palette_base: int,
     first_sprite: int,
     frames: int,
@@ -142,11 +145,13 @@ def write_bundle(
         "stream_banks": stream_banks,
         "last_bank": stream_banks - 1,
         "bank_numbers": " ".join(str(bank) for bank in range(stream_banks)),
-        "prom2_size": stream_banks * stream_mod.PROM_BANK_BYTES,
         "max_updates": max_updates,
         "tick_cycles": tick_cycles,
         "tile_count": tile_count,
         "last_tile": tile_count - 1,
+        "crom_payload": crom_payload,
+        "crom_size": crom_size,
+        "free_tiles": (crom_size - crom_payload) // crom.TILE_BYTES_PER_ROM,
         "palette_base": palette_base,
         "first_sprite": first_sprite,
         "last_sprite": first_sprite + stream_mod.GRID_COLS - 1,

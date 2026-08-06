@@ -184,8 +184,15 @@ else
     rm -f "$ROM/v21.v2"
 fi
 
+CROM_BYTES=$(python3 -c 'import sys; size = 1 << 20
+while size < int(sys.argv[1]):
+    size <<= 1
+print(size)' "$(file_size "$BAKED/c1.bin")")
+echo "[crom] dictionary $(file_size "$BAKED/c1.bin") bytes per half, padded to $CROM_BYTES"
 cp "$BAKED/c1.bin" "$ROM/c1.c1"
 cp "$BAKED/c2.bin" "$ROM/c2.c2"
+set_file_size "$ROM/c1.c1" "$CROM_BYTES"
+set_file_size "$ROM/c2.c2" "$CROM_BYTES"
 rm -f "$ROM/p1.raw"
 
 echo "[rom] sizes:"

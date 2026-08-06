@@ -12,10 +12,6 @@ if [[ ! -d "$BUNDLE/movie" ]]; then
     exit 1
 fi
 
-STREAM_BANKS=$(command ls "$BUNDLE"/movie/fmv_stream__bank*.S | wc -l | tr -d '[:space:]')
-CROM_BYTES=$(wc -c < "$BUNDLE/movie/c1.bin" | tr -d '[:space:]')
-PROM2_BYTES=$((STREAM_BANKS * 1048576))
-
 fetch_stock_project() {
     local upstream="$1"
 
@@ -54,7 +50,7 @@ cp -f "$HERE/main.c" "$PROJECT/main.c"
 cp -Rf "$BUNDLE" "$PROJECT/fmv"
 
 echo "[integrate] the edits the bundle's guide asks for"
-uv --project "$HERE/../../tools" run python -m aesmovie.integrate "$PROJECT" "$CROM_BYTES" "$PROM2_BYTES"
+uv --project "$HERE/../../tools" run python -m aesmovie.integrate "$PROJECT"
 
 echo "[build] the cartridge"
 # shellcheck disable=SC2016

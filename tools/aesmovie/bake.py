@@ -1,9 +1,18 @@
 """Drive the bake passes and report what the movie costs in ROM.
 
-Writes the cart-side artifacts under `build/baked/` and the two
-generated sources under `build/generated/`. Large blobs reach the ROM
-through `.incbin` in an assembly stub rather than as C arrays, because a
-multi-megabyte C array costs minutes of compile time and buys nothing.
+Writes the cart-side artifacts under `build/baked/` and the generated
+sources under `build/generated/`. Blobs reach the ROM through `.incbin`
+in an assembly stub rather than as C arrays. Measured on this toolchain,
+a C array costs about five times its own size in source text and 0.4
+seconds per 256 KiB; the tables alone would be tolerable either way, and
+the character ROM would not, since it never passes through the compiler
+at all and turning it into source would mean compiling it only to
+extract the same bytes back out.
+
+The character ROM halves are written at the dictionary's own length with
+no padding. A sprite ROM is a flat array of tiles, so a caller appending
+its own writes them straight after the movie's, and whoever assembles
+the cartridge pads to the power of two the hardware needs.
 
 The stub names those blobs by filename alone and leaves the assembler
 to find them on its include path, so the build passes `-I` for the baked
@@ -34,6 +43,7 @@ from aesmovie import (
     adpcmb,
     bundle,
     content,
+    crom,
     encode,
     fixtiles,
     frames,
@@ -240,6 +250,9 @@ _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 
 #define MOVIE_FRAME_COUNT {frames}
 #define MOVIE_TILE_COUNT {tiles}
+#define MOVIE_FIRST_FREE_TILE {tiles}
+#define MOVIE_FREE_TILES {free_tiles}
+#define MOVIE_CROM_BYTES {crom_size}
 #define MOVIE_PALETTE_COUNT {palettes}
 #define MOVIE_PALETTE_BASE {base_bank}
 #define MOVIE_EPOCH_COUNT {epochs}
@@ -473,6 +486,8 @@ def write_movie_bundle(target: Path, outcome: BakeOutcome) -> bundle.BundleLayou
         max_updates=stats.max_updates,
         tick_cycles=stats.max_updates * CYCLES_PER_UPDATE,
         tile_count=stats.tile_count,
+        crom_payload=outcome.result.dictionary.payload_bytes(),
+        crom_size=crom.rom_size_for(stats.tile_count),
         palette_base=outcome.result.palette_set.base_bank,
         first_sprite=stream_mod.FIRST_SPRITE,
         frames=stats.frames,
@@ -584,6 +599,12 @@ def _write_sources(
         "stream_base_symbol": STREAM_BASE_SYMBOL,
         "baker_major": major,
         "baker_minor": minor,
+        "crom_size": crom.rom_size_for(result.stats.tile_count),
+        "free_tiles": (
+            crom.rom_size_for(result.stats.tile_count)
+            - result.stats.tile_count * crom.TILE_BYTES_PER_ROM
+        )
+        // crom.TILE_BYTES_PER_ROM,
         "cycles_per_update": CYCLES_PER_UPDATE,
         "tick_cycles": result.stats.max_updates * CYCLES_PER_UPDATE,
         "vblank_cycles": VBLANK_CYCLES,
@@ -875,7 +896,7 @@ def run(request: BakeRequest) -> BakeOutcome:
 
     baked = request.build_dir / "baked"
     baked.mkdir(parents=True, exist_ok=True)
-    c1, c2 = result.dictionary.rom_images()
+    c1, c2 = result.dictionary.rom_images(pad_to=result.dictionary.payload_bytes())
     payload = {
         "c1": (baked / "c1.bin", c1),
         "c2": (baked / "c2.bin", c2),

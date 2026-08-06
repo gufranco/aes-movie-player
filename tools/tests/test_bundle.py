@@ -41,6 +41,8 @@ def _write(root, **overrides):
         "max_updates": 280,
         "tick_cycles": 17920,
         "tile_count": 33142,
+        "crom_payload": 33142 * 64,
+        "crom_size": 4194304,
         "palette_base": 16,
         "first_sprite": 1,
         "frames": 1775,
@@ -163,6 +165,48 @@ class TestMakeFragment:
         layout = _write(tmp_path)
 
         assert "FMV_FIRST_BANK ?=" in layout.makefile.read_text()
+
+
+class TestSpaceForTheCallersOwnTiles:
+    def test_the_fragment_states_the_sprite_rom_size(self, tmp_path):
+        text = _write(tmp_path).makefile.read_text()
+
+        assert "FMV_CROM_BYTES = 4194304" in text
+
+    def test_the_fragment_states_where_the_callers_tiles_begin(self, tmp_path):
+        text = _write(tmp_path).makefile.read_text()
+
+        assert "FMV_FIRST_FREE_TILE = 33142" in text
+
+    def test_the_fragment_states_how_many_slots_the_slack_is_worth(self, tmp_path):
+        text = _write(tmp_path).makefile.read_text()
+
+        assert f"FMV_FREE_TILES = {(4194304 - 33142 * 64) // 64}" in text
+
+    def test_a_dictionary_that_fills_the_rom_leaves_no_slack(self, tmp_path):
+        layout = _write(tmp_path, crom_payload=4194304, crom_size=4194304)
+
+        assert "FMV_FREE_TILES = 0" in layout.makefile.read_text()
+
+    def test_the_fragment_reserves_the_banks_the_caller_owns(self, tmp_path):
+        text = _write(tmp_path, banks=2, stream_banks=2).makefile.read_text()
+
+        assert "FMV_ALL_BANK_NUMBERS" in text
+        assert (
+            "$(foreach bank,$(FMV_ALL_BANK_NUMBERS),$(eval $(PROM2): $(PROM2)_bank$(bank)))" in text
+        )
+
+    def test_the_second_program_rom_grows_with_the_first_bank(self, tmp_path):
+        text = _write(tmp_path).makefile.read_text()
+
+        assert "FMV_TOTAL_BANKS = $(shell expr $(FMV_FIRST_BANK) + $(FMV_STREAM_BANKS))" in text
+        assert "FMV_PROM2_BYTES = $(shell expr $(FMV_TOTAL_BANKS) \\* 1048576)" in text
+
+    def test_the_guide_shows_the_callers_tiles_listed_after_the_movies(self, tmp_path):
+        text = _write(tmp_path).guide.read_text()
+
+        assert "$(CROM1): $(FMV_MOVIE)/c1.bin $(BUILDDIR)/assets/my-tiles.c1" in text
+        assert "CROMSIZE = $(FMV_CROM_BYTES)" in text
 
 
 class TestGuide:
