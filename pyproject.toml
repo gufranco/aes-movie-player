@@ -1,8 +1,9 @@
 [tool.semantic_release]
 tag_format = "v{version}"
 version_toml = ["tools/pyproject.toml:project.version"]
+version_variables = ["src/fmv/fmv.h:FMV_VERSION"]
 commit_parser = "conventional"
-build_command = ""
+build_command = "uv --project tools run python -m aesmovie.stamp"
 commit_message = "chore(release): {version}"
 allow_zero_version = true
 major_on_zero = false
