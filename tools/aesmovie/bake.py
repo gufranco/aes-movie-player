@@ -675,42 +675,6 @@ class _PreviewWriter:
             raise RuntimeError(msg)
 
 
-def _write_preview(path: Path, rendered: np.ndarray) -> None:
-    if rendered.shape[0] == 0:
-        msg = "preview requested but no rendered frames were collected"
-        raise ValueError(msg)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    rate = frames.VBLANK_FPS
-    process = subprocess.Popen(
-        [
-            "ffmpeg",
-            "-v",
-            "error",
-            "-y",
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "rgb24",
-            "-s",
-            f"{encode.FRAME_WIDTH}x{encode.FRAME_HEIGHT}",
-            "-r",
-            f"{rate.numerator}/{rate.denominator}",
-            "-i",
-            "-",
-            *_preview_codec(path),
-            str(path),
-        ],
-        stdin=subprocess.PIPE,
-    )
-    assert process.stdin is not None
-    for frame in rendered:
-        process.stdin.write(neocolor.color_index_to_rgb(frame).astype(np.uint8).tobytes())
-    process.stdin.close()
-    if process.wait() != 0:
-        msg = f"ffmpeg failed to write the preview at {path}"
-        raise RuntimeError(msg)
-
-
 def _palette_blob(result: encode.EncodeResult) -> bytes:
     """Every epoch's CRAM words, back to back in playing order."""
     return b"".join(palette_set.cram_blob() for palette_set in result.palette_sets)

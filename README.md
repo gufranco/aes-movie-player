@@ -1246,3 +1246,27 @@ Built with [ngdevkit](https://github.com/dciabrin/ngdevkit). Verified
 against [geolith](https://github.com/libretro/geolith-libretro) and
 [MAME](https://github.com/mamedev/mame). Test footage is Big Buck Bunny and
 Tears of Steel, both by the Blender Foundation under CC BY.
+
+### On ngdevkit
+
+ngdevkit is LGPL-3.0 and this project is GPL-3.0, so what was taken from
+it and what was not is worth stating plainly.
+
+Two conventions were followed rather than invented: that an object whose
+file name contains `__bank` belongs in switchable program ROM, which its
+linkscript implements, and that a cartridge is declared through a
+`rom.mk` and built through a `Makefile` that includes it. Both are
+interface, not implementation, and the emitted `.mk` fragment is written
+against them.
+
+No file from ngdevkit or from `ngdevkit-examples` is copied into this
+repository. Checked rather than asserted: no file here is byte-identical
+to one of theirs, and there is no run of four or more consecutive
+identical lines of code between the two trees, comments and blank lines
+excluded. The [cutscene example](examples/cutscene) fetches a stock
+project at build time instead of vendoring one, and edits only the two
+files that project exists to have edited.
+
+The cartridges built here link ngdevkit's libraries, which is the use
+LGPL-3.0 is written for and which GPL-3.0 accommodates. No binary is
+distributed from this repository at all; everything ships as source.

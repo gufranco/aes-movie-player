@@ -620,12 +620,6 @@ class TestCommandLine:
         assert (build / "baked" / "stream.bin").is_file()
 
 
-class TestPreviewGuards:
-    def test_a_preview_without_rendered_frames_is_rejected(self, tmp_path):
-        with pytest.raises(ValueError, match="no rendered frames"):
-            bake._write_preview(tmp_path / "x.mkv", np.zeros((0, 224, 320), dtype=np.uint16))
-
-
 class TestRenderCollection:
     def test_skipping_the_preview_skips_collecting_rendered_frames(self, synthetic_clip, tmp_path):
         outcome = bake.run(

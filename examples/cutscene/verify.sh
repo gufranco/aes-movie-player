@@ -9,8 +9,9 @@ ROM_DIR="${ROM_DIR:-$WORK/cutscene/build/rom}"
 BIOS_ZIP="${BIOS_ZIP:-$HOME/Library/Application Support/RetroArch/system/neogeo.zip}"
 BIOS_ROM="${BIOS_ROM:-uni-bios_2_3.rom}"
 BIOS_OPTION="${BIOS_OPTION:-unibios23}"
-SETTLED_SECONDS="${SETTLED_SECONDS:-45}"
-STILL_SECONDS="${STILL_SECONDS:-50}"
+BOOT_ALLOWANCE="${BOOT_ALLOWANCE:-15}"
+SETTLE_MARGIN="${SETTLE_MARGIN:-6}"
+STILL_MARGIN="${STILL_MARGIN:-5}"
 
 if ! command -v mame >/dev/null; then
     echo "mame not found on PATH" >&2
@@ -26,6 +27,16 @@ if [[ ! -f "$BIOS_ZIP" ]]; then
     echo "BIOS archive not found: $BIOS_ZIP" >&2
     exit 1
 fi
+
+MOVIE_SECONDS="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$PREVIEW" \
+    | command cut -d. -f1)"
+if [[ -z "$MOVIE_SECONDS" ]]; then
+    echo "could not read the length of $PREVIEW" >&2
+    exit 1
+fi
+SETTLED_SECONDS=$((BOOT_ALLOWANCE + MOVIE_SECONDS + SETTLE_MARGIN))
+STILL_SECONDS=$((SETTLED_SECONDS + STILL_MARGIN))
+echo "[plan] the cutscene runs ${MOVIE_SECONDS}s, so the screen is read at ${SETTLED_SECONDS}s and ${STILL_SECONDS}s"
 
 STAGE="$(mktemp -d -t cutscene-verify-XXXXXX)"
 trap 'rm -rf "$STAGE"' EXIT
