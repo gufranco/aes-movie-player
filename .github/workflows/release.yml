@@ -31,6 +31,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: tools/uv.lock
+          cache-suffix: release
 
       - name: Install ffmpeg
         run: |

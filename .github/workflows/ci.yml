@@ -58,6 +58,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: tools/uv.lock
+          cache-suffix: baker
 
       - name: Install ffmpeg
         run: |
@@ -95,6 +96,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: tools/uv.lock
+          cache-suffix: cartridge
 
       - name: Install the m68k toolchain and ffmpeg
         run: |
