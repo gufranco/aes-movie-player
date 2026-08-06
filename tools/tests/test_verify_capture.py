@@ -162,6 +162,61 @@ class TestMatching:
         assert self.run_main(capture, preview) == 2
 
 
+class TestSeparation:
+    def run_main(self, capture: Path, preview: Path, **kwargs) -> int:
+        argv = ["--capture", str(capture), "--preview", str(preview)]
+        for key, value in kwargs.items():
+            argv += [f"--{key.replace('_', '-')}", str(value)]
+        return verify_capture.main(argv)
+
+    def test_the_run_of_identical_frames_around_the_best_is_not_a_rival(self):
+        scored = {0: 9.0, 1: 1.5, 2: 1.5, 3: 1.5, 4: 8.0}
+
+        assert verify_capture.tied_run(scored, 2) == {1, 2, 3}
+
+    def test_a_lone_best_frame_is_its_own_run(self):
+        scored = {0: 9.0, 1: 1.5, 2: 8.0}
+
+        assert verify_capture.tied_run(scored, 1) == {1}
+
+    def test_a_run_that_reaches_the_end_stops_there(self):
+        scored = {0: 1.5, 1: 1.5}
+
+        assert verify_capture.tied_run(scored, 1) == {0, 1}
+
+    def test_it_reports_how_far_ahead_the_match_is(self, rendered, capsys):
+        frames, preview, directory = rendered
+        capture = directory / "separated.png"
+        write_png(capture, frames[2][:, OVERSCAN : WIDTH - OVERSCAN])
+
+        self.run_main(capture, preview)
+
+        assert "nearest rival" in capsys.readouterr().out
+
+    def test_a_match_no_better_than_its_rival_is_refused(self, tmp_path, capsys):
+        first = make_frames(1, seed=5)[0]
+        second = first.copy()
+        second[0, WIDTH // 2] = (second[0, WIDTH // 2].astype(int) + 1) % 256
+        preview = tmp_path / "twins.mkv"
+        write_lossless(preview, np.stack([first, second]))
+        capture = tmp_path / "twin.png"
+        write_png(capture, first[:, OVERSCAN : WIDTH - OVERSCAN])
+
+        code = self.run_main(capture, preview, min_separation=5.0)
+
+        assert code == 2
+        assert "AMBIGUOUS" in capsys.readouterr().err
+
+    def test_a_clearly_separated_match_is_accepted(self, rendered):
+        frames, preview, directory = rendered
+        capture = directory / "clear.png"
+        write_png(capture, frames[1][:, OVERSCAN : WIDTH - OVERSCAN])
+
+        code = self.run_main(capture, preview, min_separation=1.0)
+
+        assert code == 0
+
+
 class TestUpscaledCaptures:
     def test_an_integer_upscaled_capture_is_reduced_to_the_active_area(self):
         frame = make_frames(1, seed=31)[0][:, OVERSCAN : WIDTH - OVERSCAN]

@@ -30,6 +30,26 @@ from tests.geolith_model import GeolithTileReader, StreamPlayer
 RASTER_WIDTH = 320
 RASTER_HEIGHT = 224
 
+TIE = 1e-9
+"""Errors this close are the same picture, not a better one."""
+
+
+def tied_run(scored: dict[int, float], best: int) -> set[int]:
+    """The frames around the best match that score identically to it.
+
+    A 24 fps source shown on a 59.185 Hz raster repeats each frame about
+    two and a half times, so a match is a run rather than a single
+    frame. Every member of that run is the same picture, and none of
+    them is a rival to the others.
+    """
+    run = {best}
+    for direction in (-1, 1):
+        step = best
+        while step + direction in scored and abs(scored[step + direction] - scored[best]) <= TIE:
+            step += direction
+            run.add(step)
+    return run
+
 
 def _decode_rgb(path: Path) -> bytes:
     return subprocess.run(
@@ -172,6 +192,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--frame", type=int, default=None)
     parser.add_argument("--overscan", type=int, default=8)
     parser.add_argument("--max-mean-error", type=float, default=1.0)
+    parser.add_argument("--min-separation", type=float, default=1.0)
     args = parser.parse_args(argv)
 
     if args.preview is None and args.baked is None:
@@ -206,9 +227,11 @@ def main(argv: list[str]) -> int:
     target = capture.astype(np.int16)
     best, best_error, best_frame, count = -1, float("inf"), None, 0
     worst = 0.0
+    scored: dict[int, float] = {}
     for index, frame in enumerate(reference):
         cropped = frame[:, left:right, :].astype(np.int16)
         error = float(np.abs(cropped - target).mean())
+        scored[index] = error
         worst = max(worst, error)
         if error < best_error:
             best, best_error, best_frame = index, error, cropped
@@ -222,12 +245,28 @@ def main(argv: list[str]) -> int:
     print(f"exact pixel match: {np.array_equal(best_frame.astype(np.uint8), capture)}")
     print(f"worst frame error: {worst:.4f}")
 
+    rivals = {step: error for step, error in scored.items() if step not in tied_run(scored, best)}
+    contender = min(rivals, key=lambda step: rivals[step]) if rivals else None
+    if contender is not None:
+        margin = rivals[contender] - best_error
+        print(f"nearest rival: frame {contender} at {rivals[contender]:.4f}, {margin:.4f} behind")
+
     if best_error > args.max_mean_error:
         print(
             f"FAIL: best match error {best_error:.4f} exceeds {args.max_mean_error}",
             file=sys.stderr,
         )
         return 1
+
+    if contender is not None and rivals[contender] - best_error < args.min_separation:
+        print(
+            f"AMBIGUOUS: frame {best} at {best_error:.4f} and frame {contender} at "
+            f"{rivals[contender]:.4f} sit within {args.min_separation} of each other, so which "
+            f"one the capture shows is a guess rather than a measurement",
+            file=sys.stderr,
+        )
+        return 2
+
     print("PASS")
     return 0
 
