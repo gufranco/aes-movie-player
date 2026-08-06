@@ -295,6 +295,15 @@ class TestVersionStamp:
     def test_the_baker_version_is_the_installed_one(self):
         assert bake.baker_version() == (1, 0)
 
+    def test_the_library_header_carries_the_same_version_as_the_package(self):
+        header = (bundle.LIBRARY_ROOT / "fmv.h").read_text()
+        stated = {
+            name: int(header.split(f"#define FMV_VERSION_{name} ")[1].split("\n")[0])
+            for name in ("MAJOR", "MINOR")
+        }
+
+        assert (stated["MAJOR"], stated["MINOR"]) == bake.baker_version()
+
 
 class TestTickCost:
     def test_the_header_states_the_worst_frame_in_updates(self, baked):

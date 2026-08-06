@@ -109,9 +109,26 @@ options.skip_user = &state;
 | C-ROM tiles | 0 to {last_tile} | {tile_count} upward. Pack your own tiles after the movie's |
 | P-ROM banks | {stream_banks}, starting at `FMV_FIRST_BANK` | The other banks, and the whole fixed megabyte |
 | Fix layer | Nothing | All of it. The library draws no text |
-| LSPC mode, fix source, palette bank, bank latch | Saved on open, restored on close | Set them however you like before and after |
+| LSPC mode, fix source, palette bank, bank latch | Set while the movie runs, put back on close | Yours, but you have to declare them. See below |
 
-Two of those deserve a sentence.
+Three of those deserve a sentence.
+
+**The machine state it restores is the state you declare, not the state
+it found.** The LSPC mode register, the two fix-source latches, the two
+palette-bank latches and the P-ROM bank latch are all write-only. Reading
+`0x3A0000` upward returns the last word on the bus, which is normally the
+next opcode; reading `0x3C0006` returns the raster line counter rather
+than the mode. So nothing, this library included, can save those by
+reading them. `fmv_defaults()` fills in the values a plain cartridge
+uses: LSPC mode `0`, the cart fix ROM, palette bank 0 and P-ROM bank 0.
+Change any of them in your own setup and say so:
+
+```c
+options.lspc_mode = MY_AUTOANIMATION_SPEED << 8;
+options.fix_source = FMV_FIX_BOARD;
+options.palette_bank = 1;
+options.prom_bank = 3;
+```
 
 **The palette base is a bake-time choice, not a runtime one.** A palette
 number is baked into every tile word in the stream, so moving it means

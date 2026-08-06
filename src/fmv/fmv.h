@@ -54,10 +54,17 @@ typedef struct {
 
 typedef int (*fmv_skip_fn)(void *user);
 
+#define FMV_FIX_CART  0
+#define FMV_FIX_BOARD 1
+
 typedef struct {
     uint16_t first_sprite;
     uint16_t top_line;
     uint16_t left_pixel;
+    uint16_t lspc_mode;
+    uint8_t fix_source;
+    uint8_t palette_bank;
+    uint8_t prom_bank;
     uint8_t skip_pad;
     uint8_t skip_start;
     uint8_t audio;
@@ -76,9 +83,6 @@ typedef struct {
     uint16_t sprite_offset;
     uint16_t stream_bank;
     uint16_t updates;
-    uint16_t saved_lspc;
-    uint8_t saved_fix_source;
-    uint8_t saved_palette_bank;
     uint8_t audio_running;
     uint8_t open;
 } fmv_player;

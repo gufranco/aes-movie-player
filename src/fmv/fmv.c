@@ -11,6 +11,7 @@
 #define DEFAULT_FIRST_SPRITE 1
 #define DEFAULT_SKIP_PAD   (FMV_PAD_A)
 #define DEFAULT_SKIP_START 1
+#define DEFAULT_LSPC_MODE  0
 
 static uint16_t epoch_words(const fmv_player *player)
 {
@@ -170,12 +171,32 @@ fmv_options fmv_defaults(void)
     options.first_sprite = DEFAULT_FIRST_SPRITE;
     options.top_line = 0;
     options.left_pixel = 0;
+    options.lspc_mode = DEFAULT_LSPC_MODE;
+    options.fix_source = FMV_FIX_CART;
+    options.palette_bank = 0;
+    options.prom_bank = 0;
     options.skip_pad = DEFAULT_SKIP_PAD;
     options.skip_start = DEFAULT_SKIP_START;
     options.audio = 1;
     options.skip = 0;
     options.skip_user = 0;
     return options;
+}
+
+static void restore_machine(const fmv_options *options)
+{
+    REG_LSPCMODE = options->lspc_mode;
+    if (options->fix_source == FMV_FIX_BOARD) {
+        select_board_fix_rom();
+    } else {
+        select_cart_fix_rom();
+    }
+    if (options->palette_bank != 0) {
+        select_palette_bank_one();
+    } else {
+        select_palette_bank_zero();
+    }
+    PROM_BANK_SELECT = options->prom_bank;
 }
 
 void fmv_open(fmv_player *player, const fmv_movie *movie, const fmv_options *options)
@@ -192,9 +213,6 @@ void fmv_open(fmv_player *player, const fmv_movie *movie, const fmv_options *opt
     player->stream_bank = 0xFFFF;
     player->updates = 0;
     player->audio_running = 0;
-    player->saved_lspc = REG_LSPCMODE;
-    player->saved_fix_source = REG_CRTFIX;
-    player->saved_palette_bank = REG_PALBANK0;
     player->open = 1;
 
     REG_LSPCMODE = LSPC_DISABLE_AUTOANIM;
@@ -260,10 +278,7 @@ void fmv_close(fmv_player *player)
     fmv_audio_halt(player);
     retire_sprite_grid(player);
     blank_owned_palettes(player);
-    REG_LSPCMODE = player->saved_lspc;
-    REG_CRTFIX = player->saved_fix_source;
-    REG_PALBANK0 = player->saved_palette_bank;
-    PROM_BANK_SELECT = 0;
+    restore_machine(&player->options);
     player->stream_bank = 0xFFFF;
     player->open = 0;
 }

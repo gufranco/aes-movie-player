@@ -80,7 +80,11 @@ static inline void vram_fill(uint16_t address, uint16_t count, uint16_t value)
 
 static inline void select_cart_fix_rom(void) { REG_CRTFIX = 0; }
 
+static inline void select_board_fix_rom(void) { REG_BRDFIX = 0; }
+
 static inline void select_palette_bank_zero(void) { REG_PALBANK0 = 0; }
+
+static inline void select_palette_bank_one(void) { REG_PALBANK1 = 0; }
 
 static inline uint16_t scb3_word(int top, uint16_t sticky, uint16_t tiles_high)
 {
