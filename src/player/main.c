@@ -262,8 +262,8 @@ int main(void)
         if (debug_visible) {
             diag.frame = frame;
             diag.total = MOVIE_FRAME_COUNT;
-            diag.epoch = video.resident_epoch;
-            diag.bank = video.stream_bank;
+            diag.epoch = fmv_epoch(&video);
+            diag.bank = fmv_stream_bank(&video);
             diag.audio_page = timeline_audio_page(frame, MOVIE_AUDIO_PAGE_NUM,
                                                   MOVIE_AUDIO_PAGE_DEN);
             diag.updates = updates;

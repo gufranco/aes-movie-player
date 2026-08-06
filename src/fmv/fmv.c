@@ -298,6 +298,16 @@ uint16_t fmv_last_updates(const fmv_player *player)
     return player->updates;
 }
 
+uint16_t fmv_epoch(const fmv_player *player)
+{
+    return player->resident_epoch;
+}
+
+uint16_t fmv_stream_bank(const fmv_player *player)
+{
+    return player->stream_bank;
+}
+
 static int viewer_skipped(const fmv_player *player)
 {
     const fmv_options *options = &player->options;

@@ -107,6 +107,13 @@ back the same way, so a caller that treats them alike is correct.
 | `fmv_ended(player)` | Non-zero once the last frame has been shown |
 | `fmv_position(player)` | The frame the player is about to show |
 | `fmv_last_updates(player)` | Slot updates the last tick wrote, for a caller measuring its own budget |
+| `fmv_epoch(player)` | Which palette epoch is resident |
+| `fmv_stream_bank(player)` | Which switchable bank the last frame was read from |
+
+**The functions above are the surface.** `fmv_movie` and `fmv_player`
+are declared in the header so you can allocate them, not so you can read
+them: their fields move between versions and the accessors do not. The
+version stamp catches the mismatch if you hold a copy that drifted.
 
 Nothing in that list reads a pad register unless you asked for it. Set
 `options.skip` to your own predicate and the library never touches the

@@ -104,5 +104,7 @@ void fmv_close(fmv_player *player);
 int fmv_ended(const fmv_player *player);
 uint32_t fmv_position(const fmv_player *player);
 uint16_t fmv_last_updates(const fmv_player *player);
+uint16_t fmv_epoch(const fmv_player *player);
+uint16_t fmv_stream_bank(const fmv_player *player);
 
 #endif

@@ -1218,8 +1218,12 @@ fields once already, when the registers it claimed to restore turned out
 not to be readable. What protects a developer in the meantime is the
 version stamp rather than a promise, since the emitted folder carries the
 library source it was baked against and a mismatch fails the build with
-both versions named. Expect the surface to settle at the next major
-version, and read the guide in the folder you hold rather than this page.
+both versions named.
+
+The functions in `fmv.h` are what a promise would eventually cover. The
+structs are declared so a caller can allocate them, not so it can read
+them, and every field a caller has needed so far has an accessor. Read
+the guide in the folder you hold rather than this page.
 
 ## Repository layout
 

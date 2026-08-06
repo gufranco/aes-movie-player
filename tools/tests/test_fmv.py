@@ -158,6 +158,8 @@ def _build(tmp_path_factory, *, audio: bool):
     loaded.fmv_last_updates.restype = ctypes.c_uint16
     loaded.fmv_play.restype = ctypes.c_int
     for name in (
+        "fmv_epoch",
+        "fmv_stream_bank",
         "fmv_test_lspc_mode",
         "fmv_test_prom_bank",
         "fmv_test_watchdog_kicks",
@@ -522,6 +524,27 @@ class TestAdvancing:
         fmv.fmv_start(player)
 
         assert fmv.fmv_test_player_stream_bank(player) == 3
+
+
+class TestReadingTheState:
+    def test_the_epoch_is_readable_without_touching_the_struct(self, fmv, movie):
+        options = fmv.fmv_defaults()
+        player = _player()
+        fmv.fmv_open(player, ctypes.byref(movie), ctypes.byref(options))
+
+        fmv.fmv_start(player)
+
+        assert fmv.fmv_epoch(player) == fmv.fmv_test_player_epoch(player)
+
+    def test_the_stream_bank_is_readable_without_touching_the_struct(self, fmv, movie):
+        movie.stream_base = 2 * 0x100000
+        options = fmv.fmv_defaults()
+        player = _player()
+        fmv.fmv_open(player, ctypes.byref(movie), ctypes.byref(options))
+
+        fmv.fmv_start(player)
+
+        assert fmv.fmv_stream_bank(player) == 2
 
 
 class TestSkipping:
