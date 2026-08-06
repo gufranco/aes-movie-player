@@ -164,7 +164,7 @@ dd if="$ROM/p1.p1" of="$ROM/p1.p1" conv=notrunc,swab status=none
 
 if [[ -f "$GENERATED/audio_params.s" ]]; then
     echo "AS src/fmv/sound.s"
-    z80-neogeo-ihx-sdasz80 -o "$BUILD/sound.rel" src/fmv/sound.s
+    z80-neogeo-ihx-sdasz80 -I"$GENERATED" -o "$BUILD/sound.rel" src/fmv/sound.s
     z80-neogeo-ihx-sdldz80 -n -i "$BUILD/sound.ihx" "$BUILD/sound.rel"
     z80-neogeo-ihx-sdobjcopy -I ihex -O binary "$BUILD/sound.ihx" "$ROM/m1.m1" --pad-to 131072
 else

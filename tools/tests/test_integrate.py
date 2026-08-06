@@ -112,10 +112,21 @@ class TestMakefile:
         assert "base-crom-logo" not in text
         assert "base-srom-text-shadow" not in text
 
-    def test_the_sound_driver_comes_from_ngdevkit(self):
+    def test_a_silent_build_takes_ngdevkit_s_empty_driver(self):
         text = integrate.makefile_edits(STOCK_MAKEFILE)
 
         assert "SOUND_DRIVER=$(NGSHAREDIR)/nullsound_driver.ihx" in text
+
+    def test_a_build_with_sound_takes_the_movie_s_driver(self):
+        text = integrate.makefile_edits(STOCK_MAKEFILE, audio=True)
+
+        assert "SOUND_DRIVER=$(FMV_SOUND_DRIVER)" in text
+        assert "FMV_AUDIO = yes" in text
+
+    def test_the_soundtrack_does_not_travel_through_romtool(self):
+        text = integrate.makefile_edits(STOCK_MAKEFILE, audio=True)
+
+        assert "$(VROM1): $(FMV_MOVIE)/v2.bin" not in text
 
     def test_a_makefile_missing_the_stock_asset_lines_is_an_error(self):
         stripped = STOCK_MAKEFILE.replace(

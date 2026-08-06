@@ -1,6 +1,6 @@
     .module sound
 
-    .include "build/generated/audio_params.s"
+    .include "audio_params.s"
 
     YM_ADDR_1 = 0x04
     YM_DATA_1 = 0x05

@@ -167,6 +167,42 @@ class TestMakeFragment:
         assert "FMV_FIRST_BANK ?=" in layout.makefile.read_text()
 
 
+class TestThePackagers:
+    def test_it_carries_a_packager_that_can_express_adpcm_b(self, tmp_path):
+        layout = _write(tmp_path)
+
+        for name in bundle.PACKAGERS:
+            assert (layout.root / bundle.PACKAGER_DIR_NAME / name).is_file(), name
+
+    def test_the_guide_says_why_they_are_there(self, tmp_path):
+        text = _write(tmp_path).guide.read_text()
+
+        assert "ymsnd:adpcmb" in text
+        assert "package/neofile.py" in text
+
+
+class TestRomImageSizes:
+    def test_a_payload_inside_a_megabyte_still_takes_one(self):
+        assert bundle.rom_image_size(1) == 1 << 20
+
+    def test_a_payload_that_overruns_takes_the_next_power_of_two(self):
+        assert bundle.rom_image_size(833536) == 1 << 20
+        assert bundle.rom_image_size((1 << 20) + 1) == 1 << 21
+
+    def test_a_payload_already_on_a_power_of_two_is_left_alone(self):
+        assert bundle.rom_image_size(1 << 22) == 1 << 22
+
+    def test_the_fragment_sizes_the_voice_rom_for_the_soundtrack(self, tmp_path):
+        text = _write(tmp_path).makefile.read_text()
+
+        assert f"FMV_VROM_BYTES = {1 << 20}" in text
+
+    def test_a_silent_bake_asks_for_no_voice_rom(self, tmp_path):
+        text = _write(tmp_path, audio=False).makefile.read_text()
+
+        assert "FMV_VROM_BYTES = 0" in text
+
+
 class TestSpaceForTheCallersOwnTiles:
     def test_the_fragment_states_the_sprite_rom_size(self, tmp_path):
         text = _write(tmp_path).makefile.read_text()

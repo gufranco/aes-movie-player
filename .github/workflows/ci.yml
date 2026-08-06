@@ -164,6 +164,15 @@ jobs:
           test -s "$rom/ngdevkit-p2.p2"
           echo "the example cartridge is $(wc -c < "$rom/ngdevkit.zip") bytes"
 
+      - name: The same project builds with the movie's soundtrack
+        run: |
+          set -euo pipefail
+          BUNDLE=$PWD/build/bundle WORK=$PWD/build/example-audio FMV_AUDIO=yes \
+            bash examples/cutscene/build.sh
+          rom=build/example-audio/cutscene/build/rom
+          cmp "$rom/ngdevkit-m1.m1" build/rom/m1.m1
+          echo "the sound driver built from the bundle matches the cartridge's own"
+
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: cartridge

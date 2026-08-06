@@ -6,6 +6,11 @@ BUNDLE="${BUNDLE:-$PWD/build/bundle}"
 WORK="${WORK:-$PWD/build/example}"
 EXAMPLES_REF="${EXAMPLES_REF:-60f1bd113471ade1a1850e0dca945cffeef38231}"
 EXAMPLES_URL="${EXAMPLES_URL:-https://github.com/dciabrin/ngdevkit-examples.git}"
+FMV_AUDIO="${FMV_AUDIO:-no}"
+AUDIO_FLAG=""
+if [[ "$FMV_AUDIO" == "yes" ]]; then
+    AUDIO_FLAG="--audio"
+fi
 
 if [[ ! -d "$BUNDLE/movie" ]]; then
     echo "no bundle at $BUNDLE; bake one with --bundle first" >&2
@@ -50,7 +55,7 @@ cp -f "$HERE/main.c" "$PROJECT/main.c"
 cp -Rf "$BUNDLE" "$PROJECT/fmv"
 
 echo "[integrate] the edits the bundle's guide asks for"
-uv --project "$HERE/../../tools" run python -m aesmovie.integrate "$PROJECT"
+uv --project "$HERE/../../tools" run python -m aesmovie.integrate "$PROJECT" $AUDIO_FLAG
 
 echo "[build] the cartridge"
 # shellcheck disable=SC2016

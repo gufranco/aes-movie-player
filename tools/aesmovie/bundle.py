@@ -44,6 +44,16 @@ GENERATED_SOURCES: Final = ("movie_data.S", "movie_data.h", "movie_data_value.c"
 
 GENERATED_OPTIONAL: Final = ("audio_params.s",)
 
+PACKAGERS: Final = ("neofile.py", "mamecart.py")
+"""Cartridge packagers that can express an ADPCM-B ROM.
+
+ngdevkit's own romtool declares every voice ROM as ADPCM-A, and
+MAME allocates a delta-T region only when a software list names
+`ymsnd:adpcmb`, so a soundtrack packaged that way is silent. These
+two are standard-library only and travel with the bundle."""
+
+PACKAGER_DIR_NAME: Final = "package"
+
 BAKED_ASSETS: Final = (
     "index.bin",
     "keyframes.bin",
@@ -63,6 +73,7 @@ STREAM_BANK_GLOB: Final = "fmv_stream__bank*.S"
 
 _TEMPLATES: Final = Path(__file__).resolve().parent / "templates"
 LIBRARY_ROOT: Final = Path(__file__).resolve().parents[2] / "src" / "fmv"
+PACKAGER_ROOT: Final = Path(__file__).resolve().parent
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +85,19 @@ class BundleLayout:
     guide: Path
     stream_banks: int
     has_audio: bool
+
+
+def rom_image_size(payload: int) -> int:
+    """Round a payload up to a size a Neo Geo ROM image may take.
+
+    Every ROM in a cartridge is a power of two, because the hardware
+    masks an address with a mask derived from the size. A payload that
+    lands anywhere else is padded by whoever assembles the cartridge.
+    """
+    size = 1 << 20
+    while size < payload:
+        size <<= 1
+    return size
 
 
 def _copy_all(names: tuple[str, ...], source: Path, target: Path, *, required: bool) -> list[Path]:
@@ -127,6 +151,10 @@ def write_bundle(
     _copy_all(BAKED_ASSETS, baked, movie, required=True)
     voice = _copy_all(BAKED_OPTIONAL, baked, movie, required=False)
 
+    packagers = target / PACKAGER_DIR_NAME
+    packagers.mkdir(parents=True, exist_ok=True)
+    _copy_all(PACKAGERS, PACKAGER_ROOT, packagers, required=True)
+
     banks = sorted(generated.glob(STREAM_BANK_GLOB))
     if len(banks) != stream_banks:
         msg = (
@@ -142,6 +170,7 @@ def write_bundle(
         "version": f"{major}.{minor}",
         "library_dir": LIBRARY_DIR_NAME,
         "movie_dir": MOVIE_DIR_NAME,
+        "packager_dir": PACKAGER_DIR_NAME,
         "stream_banks": stream_banks,
         "last_bank": stream_banks - 1,
         "bank_numbers": " ".join(str(bank) for bank in range(stream_banks)),
@@ -151,6 +180,7 @@ def write_bundle(
         "last_tile": tile_count - 1,
         "crom_payload": crom_payload,
         "crom_size": crom_size,
+        "vrom_size": rom_image_size(voice[0].stat().st_size) if voice else 0,
         "free_tiles": (crom_size - crom_payload) // crom.TILE_BYTES_PER_ROM,
         "palette_base": palette_base,
         "first_sprite": first_sprite,

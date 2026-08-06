@@ -37,6 +37,7 @@ FMV_TOTAL_BANKS = $(shell expr $(FMV_FIRST_BANK) + $(FMV_STREAM_BANKS))
 FMV_ALL_BANK_NUMBERS = $(shell seq 0 $(shell expr $(FMV_TOTAL_BANKS) - 1))
 FMV_PROM2_BYTES = $(shell expr $(FMV_TOTAL_BANKS) \* 1048576)
 FMV_CROM_BYTES = {crom_size}
+FMV_VROM_BYTES = {vrom_size}
 FMV_CROM_DICTIONARY_BYTES = {crom_payload}
 FMV_FIRST_FREE_TILE = {tile_count}
 FMV_FREE_TILES = {free_tiles}
@@ -52,6 +53,17 @@ FMV_OBJS = \
 
 ifeq ($(FMV_AUDIO),yes)
 FMV_OBJS += $(BUILDDIR)/$(FMV_SRC)/fmv_audio.o
+
+# The reference Z80 driver, and the movie's own ADPCM-B parameters that
+# it assembles against. ngdevkit's stock rule does not know where those
+# parameters live, so the driver gets a rule of its own.
+FMV_SOUND_DRIVER = $(BUILDDIR)/$(FMV_SRC)/sound.ihx
+
+$(BUILDDIR)/$(FMV_SRC)/sound.rel: $(FMV_SRC)/sound.s $(FMV_MOVIE)/audio_params.s
+	$(Z80SDAS) -g -l -p -u -I$(FMV_MOVIE) -o $@ $<
+
+$(FMV_SOUND_DRIVER): $(BUILDDIR)/$(FMV_SRC)/sound.rel
+	$(Z80SDLD) -n -i $@ $<
 else
 FMV_CFLAGS += -DFMV_NO_AUDIO
 endif

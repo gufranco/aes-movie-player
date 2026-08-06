@@ -204,6 +204,34 @@ beginning and once per seek. Merging this into a driver you already run
 is not proven here, and the page arithmetic lives in
 `{library_dir}/timeline.c` if you need to reproduce it.
 
+### Packaging a cartridge that has sound
+
+ngdevkit's `romtool` declares every voice ROM as ADPCM-A, and MAME
+allocates a delta-T region only when a software list names
+`ymsnd:adpcmb`. A soundtrack packaged that way is silent, so the movie's
+voice ROM does not travel through it.
+
+`{packager_dir}/` carries two packagers that can express it. They need
+only a standard Python, and they read a directory of ROM images under
+the names the containers use:
+
+```bash
+mkdir -p out
+cp build/rom/<game>-p1.p1 out/p1.p1
+cp build/rom/<game>-s1.s1 out/s1.s1
+cp build/rom/<game>-m1.m1 out/m1.m1
+cp build/rom/<game>-c1.c1 out/c1.c1
+cp build/rom/<game>-c2.c2 out/c2.c2
+: > out/v11.v1 && truncate -s 524288 out/v11.v1
+cp fmv/{movie_dir}/v2.bin out/v21.v2
+
+python3 fmv/{packager_dir}/neofile.py  --rom-dir out --output game.neo
+python3 fmv/{packager_dir}/mamecart.py --rom-dir out --output game.zip
+```
+
+`game.neo` is what a NeoSD loads. `mamecart.py` also writes the software
+list MAME needs, with the ADPCM-B region declared.
+
 ## Version
 
 The movie data and the library in this folder were emitted together and

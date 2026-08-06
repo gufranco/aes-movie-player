@@ -20,6 +20,10 @@ STOCK_PROM2: Final = "# PROM2=$(ROM)/$(GAMEROM)-p2.p2"
 STOCK_PROGRAM_ROM: Final = "ELF=$(BUILDDIR)/rom.elf\n$(ELF):\t$(BUILDDIR)/main.o\n$(PROM1): $(ELF)"
 MOVIE_PROGRAM_ROM: Final = "$(PROM1): $(BUILDDIR)/rom-fmv-bank0.elf"
 
+STOCK_SOUND_DRIVER: Final = "SOUND_DRIVER=$(BUILDDIR)/assets/base-sound-driver.ihx"
+SILENT_SOUND_DRIVER: Final = "SOUND_DRIVER=$(NGSHAREDIR)/nullsound_driver.ihx"
+MOVIE_SOUND_DRIVER: Final = "SOUND_DRIVER=$(FMV_SOUND_DRIVER)"
+
 STOCK_CARTRIDGE_ASSETS: Final = (
     (
         "$(SROM1): $(BUILDDIR)/assets/base-srom-text-shadow.fix",
@@ -29,10 +33,6 @@ STOCK_CARTRIDGE_ASSETS: Final = (
         "$(CROM1): $(BUILDDIR)/assets/base-crom-logo.c1\n"
         "$(CROM2): $(BUILDDIR)/assets/base-crom-logo.c2",
         "$(CROM1): $(FMV_MOVIE)/c1.bin\n$(CROM2): $(FMV_MOVIE)/c2.bin",
-    ),
-    (
-        "SOUND_DRIVER=$(BUILDDIR)/assets/base-sound-driver.ihx",
-        "SOUND_DRIVER=$(NGSHAREDIR)/nullsound_driver.ihx",
     ),
 )
 
@@ -52,7 +52,7 @@ def cartridge_edits(text: str) -> str:
     return text.replace(STOCK_CROM_SIZE, "CROMSIZE=$(FMV_CROM_BYTES)")
 
 
-def makefile_edits(text: str) -> str:
+def makefile_edits(text: str, *, audio: bool = False) -> str:
     """Include the fragment and point the cartridge at the movie.
 
     The include sits between the cartridge declaration and the build
@@ -70,7 +70,7 @@ def makefile_edits(text: str) -> str:
             raise SystemExit(msg)
 
     added = f"""FMV_GAME_OBJS = $(BUILDDIR)/main.o
-FMV_AUDIO = no
+FMV_AUDIO = {"yes" if audio else "no"}
 PROM2SIZE = $(FMV_PROM2_BYTES)
 CFLAGS += $(FMV_CFLAGS)
 LDFLAGS += $(FMV_LDFLAGS)
@@ -79,7 +79,8 @@ include fmv/fmv.mk
 {BUILD_INCLUDE}"""
     text = text.replace(BUILD_INCLUDE, added, 1)
     text = text.replace(STOCK_PROGRAM_ROM, MOVIE_PROGRAM_ROM, 1)
-    for stock, movie in STOCK_CARTRIDGE_ASSETS:
+    driver = MOVIE_SOUND_DRIVER if audio else SILENT_SOUND_DRIVER
+    for stock, movie in (*STOCK_CARTRIDGE_ASSETS, (STOCK_SOUND_DRIVER, driver)):
         if stock not in text:
             msg = f"the stock Makefile no longer carries {stock!r}"
             raise SystemExit(msg)
@@ -87,16 +88,16 @@ include fmv/fmv.mk
     return text
 
 
-def apply(project: Path) -> None:
+def apply(project: Path, *, audio: bool = False) -> None:
     """Rewrite a stock project's two editable files in place."""
     cartridge = project / "rom.mk"
     cartridge.write_text(cartridge_edits(cartridge.read_text()))
     makefile = project / "Makefile"
-    makefile.write_text(makefile_edits(makefile.read_text()))
+    makefile.write_text(makefile_edits(makefile.read_text(), audio=audio))
 
 
 def main(argv: list[str]) -> int:
-    apply(Path(argv[0]))
+    apply(Path(argv[0]), audio="--audio" in argv[1:])
     return 0
 
 
