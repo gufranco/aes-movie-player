@@ -2,12 +2,13 @@
 
 # AES Movie Player
 
-<strong>A real movie, full screen with sound, on a stock Neo Geo AES.</strong>
+<strong>A real movie, full screen with sound, on a stock Neo Geo AES.<br>
+And a library that puts one inside your own game.</strong>
 
 <br>
 
 [![Licence](https://img.shields.io/badge/licence-GPL--3.0-blue?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-711%20passing-brightgreen?style=flat-square)](tools/tests)
+[![Tests](https://img.shields.io/badge/tests-860%20passing-brightgreen?style=flat-square)](tools/tests)
 [![Hardware](https://img.shields.io/badge/runs%20on-real%20AES%20%2B%20MVS-success?style=flat-square)](#on-real-hardware)
 [![Target](https://img.shields.io/badge/target-Neo%20Geo%20AES-red?style=flat-square)](#hardware-ceilings)
 [![Verified](https://img.shields.io/badge/verified-geolith%20%2B%20MAME-blueviolet?style=flat-square)](#verification)
@@ -16,7 +17,8 @@
 
 <p align="center">
   <a href="#how-it-works"><strong>How it works</strong></a> &nbsp;|&nbsp;
-  <a href="#quick-start"><strong>Quick start</strong></a> &nbsp;|&nbsp;
+  <a href="#quick-start"><strong>Make a cartridge</strong></a> &nbsp;|&nbsp;
+  <a href="#a-movie-inside-your-own-game"><strong>Use it in your game</strong></a> &nbsp;|&nbsp;
   <a href="#verification"><strong>Verification</strong></a> &nbsp;|&nbsp;
   <a href="#hardware-notes-worth-knowing"><strong>Hardware notes</strong></a> &nbsp;|&nbsp;
   <a href="#what-is-stable"><strong>Stability</strong></a> &nbsp;|&nbsp;
@@ -34,6 +36,23 @@
 <sub>Captured from MAME running the built cartridge, upscaled 2x with nearest neighbour. The black left column is MAME's own, and is <a href="#verification">measured and explained below</a>. The same cartridge has <a href="#on-real-hardware">played through on a real AES and MVS</a>.</sub>
 
 </div>
+
+---
+
+## Two things live here
+
+**A cartridge maker.** Point it at a video file and it builds a Neo Geo
+cartridge that plays it, with a transport, subtitles and sound. Start at
+[Quick start](#quick-start).
+
+**A library for your own game.** The same renderer, packaged so a
+homebrew developer can drop a cutscene into a game they are already
+building. One blocking call owns the screen while the movie plays and
+hands every register back afterwards. Start at
+[A movie inside your own game](#a-movie-inside-your-own-game).
+
+The cartridge is built on the library rather than beside it, so anything
+that breaks one breaks the other.
 
 ---
 
@@ -414,6 +433,88 @@ bash tools/scripts/verify_mame.sh
 ```
 
 </details>
+
+## A movie inside your own game
+
+The renderer is a library, and the baker will emit it as a folder you
+drop into an ngdevkit project. Everything ships as source.
+
+```bash
+uv --project tools run python -m aesmovie.bake \
+    --source intro.mkv --quality q17 --duration 30 \
+    --build-dir build --bundle game/fmv
+```
+
+That writes `game/fmv/` holding the library source, the baked movie, a
+`.mk` fragment and an integration guide written against the movie you
+just baked. Add one line to your `Makefile`, point the cartridge at the
+movie's ROM images, and call it:
+
+```c
+#include "fmv.h"
+#include "movie_data.h"
+
+fmv_options options = fmv_defaults();
+
+options.skip_pad = FMV_PAD_A | FMV_PAD_B;
+switch (fmv_play(&fmv_movie_data, &options)) {
+case FMV_FINISHED: break;
+case FMV_SKIPPED:  break;
+}
+game_redraw();
+```
+
+`fmv_play` blocks until the movie ends or the player skips it. While it
+runs the movie owns the screen, which is what a cutscene wants and what
+keeps the surface this small. Underneath it are `fmv_open`, `fmv_start`,
+`fmv_tick`, `fmv_seek` and `fmv_close` for a caller that wants to drive
+its own loop.
+
+### What it takes, and what it leaves you
+
+| Resource | The movie takes | Yours |
+|---|---|---|
+| Sprites | 20, from `options.first_sprite` | Every other sprite |
+| Palette banks | From the bake's `--base-bank` upward | Everything below it |
+| C-ROM tiles | 0 up to the dictionary size | The rest of the 128 MiB, reserved up front with `--tile-budget` |
+| P-ROM banks | As many as the stream needs, from `FMV_FIRST_BANK` | The other banks, and the whole fixed megabyte |
+| Fix layer | Nothing at all | All of it |
+| Z80 and the M1 ROM | Nothing, unless you ask for sound | Yours by default |
+
+Two of those are worth knowing before you start.
+
+**Your code must live in the fixed first megabyte.** The library switches
+the P-ROM bank latch to read the stream, so code running from a
+switchable bank would disappear underneath itself.
+
+**The machine state it restores is the state you declare.** The LSPC
+mode register, the fix-source and palette-bank latches and the bank latch
+are all write-only: reading `0x3A0000` upward returns the last word on
+the bus, and reading `0x3C0006` returns the raster line counter rather
+than the mode. Nothing can save those by reading them. `fmv_defaults()`
+fills in what a plain cartridge uses, and a caller that runs
+auto-animation or the board fix ROM says so once.
+
+### Sound is opt-in
+
+The video path needs no sound driver, so a game that already owns the M1
+ROM keeps it. That is the default. The movie's soundtrack is ADPCM-B
+driven by three Z80 commands, and the reference driver ships as source to
+read or merge; doing that inside a driver you already run is not proven
+here, and the guide says so.
+
+### The worked example
+
+[`examples/cutscene/`](examples/cutscene) is a game that plays a
+cutscene and carries on. It is built from the emitted folder exactly the
+way a developer would build it: a stock ngdevkit project at a pinned
+commit, the bundle copied in, and the edits the guide asks for applied to
+that project's own `Makefile` and `rom.mk`. No linkscript is touched and
+no emitted file is edited.
+
+Its title screen is drawn after the movie returns, writing fix tiles and
+nothing else. If the library left any register somewhere the caller did
+not put it, that screen would come back wrong.
 
 ## The quality system
 
@@ -1007,6 +1108,26 @@ capture.
 ## FAQ
 
 <details>
+<summary><strong>Can I put a movie in the game I am already building?</strong></summary>
+<br>
+
+Yes, and that is what [the library half](#a-movie-inside-your-own-game)
+of this repository is for. Bake with `--bundle DIR` and you get a folder
+to drop into an ngdevkit project: the library as source, the baked movie,
+a `.mk` fragment and a guide written against the movie you baked.
+
+The video path needs no sound driver, so a game that already owns the M1
+ROM keeps it. What you do have to give up is C-ROM, since the movie's
+tile dictionary and your own sprites come out of the same 128 MiB with no
+bankswitching between them, and the fixed first megabyte of program ROM,
+since the library switches the bank latch to read the stream.
+
+[`examples/cutscene/`](examples/cutscene) is the worked case, built from
+an emitted folder in a stock ngdevkit project.
+
+</details>
+
+<details>
 <summary><strong>Why not just use a video codec?</strong></summary>
 <br>
 
@@ -1085,18 +1206,29 @@ them is a major version.
 | `build/aesmovie.neo` and `build/aesmovie.zip` | Where the cartridge lands, and what it is called |
 | Exit codes | 0 on success, non-zero on failure, and a distinct code when a bake ran out of dictionary |
 
-Two things are deliberately not promised. `python -m aesmovie.bake` is the
+Three things are deliberately not promised. `python -m aesmovie.bake` is the
 low-level baker and carries knobs that exist to be experimented with, so its
 surface can move. The numbers a bake reports in `report.json` are measurements
 rather than an interface; fields may be added, and what they mean is defined by
 the code that computes them.
 
+The C library is the third. `fmv.h` is new and has not been through a
+release yet, so its shape can still move: `fmv_options` gained four
+fields once already, when the registers it claimed to restore turned out
+not to be readable. What protects a developer in the meantime is the
+version stamp rather than a promise, since the emitted folder carries the
+library source it was baked against and a mismatch fails the build with
+both versions named. Expect the surface to settle at the next major
+version, and read the guide in the folder you hold rather than this page.
+
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| [`src/`](src) | The 68000 player, the fix-layer menu, and the Z80 sound driver |
-| [`tools/aesmovie/`](tools/aesmovie) | The baker: decode, colour, palettes, dictionary, encoder, quality ladder, audio, ROM containers |
+| [`src/fmv/`](src/fmv) | The library: VRAM setup, the sprite grid, palette epochs, the per-frame replay, keyframe seek, and the optional ADPCM-B paging |
+| [`src/player/`](src/player) | The movie cartridge, built on the library. Transport, menu, subtitles, diagnostics |
+| [`examples/cutscene/`](examples/cutscene) | A game that plays a cutscene and carries on, built from an emitted bundle in a stock ngdevkit project |
+| [`tools/aesmovie/`](tools/aesmovie) | The baker: decode, colour, palettes, dictionary, encoder, quality ladder, audio, ROM containers, bundle emission |
 | [`tools/tests/`](tools/tests) | Test suite, including the emulator transcriptions used as oracles |
 | [`tools/scripts/`](tools/scripts) | Capture, verification, timing and ladder-sweep helpers |
 | [`toolchain/`](toolchain) | The ngdevkit build, native or containerised |
