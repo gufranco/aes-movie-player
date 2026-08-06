@@ -36,7 +36,8 @@ cp -f "$BUILD/mame-hash/neogeo.xml" "$WORK/hash/"
 mame aes -bios "$BIOS_OPTION" -cart aesmovie \
     -rompath "$WORK/roms" -hashpath "$WORK/hash" -snapshot_directory "$WORK/snap" \
     -cfg_directory "$WORK/cfg" -nvram_directory "$WORK/nvram" -inipath "$WORK" \
-    -video none -sound none -seconds_to_run "$SECONDS_TO_RUN" \
+    -noreadconfig -video none -sound none -window -nomaximize \
+    -seconds_to_run "$SECONDS_TO_RUN" \
     -nothrottle -skip_gameinfo >/dev/null 2>&1
 
 SHOT="$(find "$WORK/snap" -name '*.png' | head -1)"
