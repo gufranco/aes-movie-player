@@ -143,6 +143,27 @@ jobs:
           echo "aesmovie.neo is $size bytes"
           test "$size" -ge 1048576
 
+      - name: Emit a drop-in bundle
+        run: |
+          uv --project tools run python -m aesmovie.bake --source ci-source.mp4 \
+            --quality q17 --duration 4 --build-dir build --bundle build/bundle
+
+      - name: A developer's project builds against the bundle
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends autoconf automake
+          BUNDLE=$PWD/build/bundle WORK=$PWD/build/example \
+            bash examples/cutscene/build.sh
+
+      - name: The example produced a cartridge
+        run: |
+          set -euo pipefail
+          rom=build/example/cutscene/build/rom
+          test -s "$rom/ngdevkit.zip"
+          test -s "$rom/ngdevkit-p1.p1"
+          test -s "$rom/ngdevkit-p2.p2"
+          echo "the example cartridge is $(wc -c < "$rom/ngdevkit.zip") bytes"
+
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: cartridge
