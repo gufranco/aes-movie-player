@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from aesmovie import adpcmb, bake, content, quality, stream
+from aesmovie import adpcmb, bake, bundle, content, quality, stream
 from aesmovie import frames as frames_mod
 from aesmovie import subtitles as subtitles_mod
 
@@ -263,6 +263,99 @@ class TestGeneratedSources:
         assert "#endif" in text
 
 
+class TestVersionStamp:
+    def test_the_header_stamps_the_version_that_baked_it(self, baked):
+        major, minor = bake.baker_version()
+
+        text = (baked.build_dir / "generated" / "movie_data.h").read_text()
+
+        assert f"#define MOVIE_BAKER_VERSION_MAJOR {major}" in text
+        assert f"#define MOVIE_BAKER_VERSION_MINOR {minor}" in text
+
+    def test_the_stamp_is_readable_as_a_string_too(self, baked):
+        major, minor = bake.baker_version()
+
+        text = (baked.build_dir / "generated" / "movie_data.h").read_text()
+
+        assert f'#define MOVIE_BAKER_VERSION_STRING "{major}.{minor}"' in text
+
+    def test_a_library_of_another_version_stops_the_build(self, baked):
+        text = (baked.build_dir / "generated" / "movie_data.h").read_text()
+
+        assert "MOVIE_BAKER_VERSION_MAJOR != FMV_VERSION_MAJOR" in text
+        assert "MOVIE_BAKER_VERSION_MINOR != FMV_VERSION_MINOR" in text
+        assert "#error" in text
+
+    def test_the_failing_build_names_both_versions(self, baked):
+        text = (baked.build_dir / "generated" / "movie_data.h").read_text()
+
+        assert "MOVIE_BAKER_VERSION_STRING)" in text
+        assert "FMV_VERSION_STRING)" in text
+
+    def test_the_baker_version_is_the_installed_one(self):
+        assert bake.baker_version() == (1, 0)
+
+
+class TestTickCost:
+    def test_the_header_states_the_worst_frame_in_updates(self, baked):
+        text = (baked.build_dir / "generated" / "movie_data.h").read_text()
+
+        assert f"#define MOVIE_MAX_UPDATES {baked.result.stats.max_updates}" in text
+
+    def test_the_header_states_what_one_update_costs(self, baked):
+        text = (baked.build_dir / "generated" / "movie_data.h").read_text()
+
+        assert f"#define MOVIE_CYCLES_PER_UPDATE {bake.CYCLES_PER_UPDATE}" in text
+
+    def test_the_header_states_what_the_worst_frame_costs(self, baked):
+        expected = baked.result.stats.max_updates * bake.CYCLES_PER_UPDATE
+
+        text = (baked.build_dir / "generated" / "movie_data.h").read_text()
+
+        assert f"#define MOVIE_TICK_CYCLES {expected}" in text
+
+    def test_the_header_states_the_budget_that_cost_is_measured_against(self, baked):
+        text = (baked.build_dir / "generated" / "movie_data.h").read_text()
+
+        assert f"#define MOVIE_VBLANK_CYCLES {bake.VBLANK_CYCLES}" in text
+
+    def test_the_blanking_budget_is_the_whole_interval(self):
+        assert bake.VBLANK_CYCLES == 18432
+
+
+class TestBundleOption:
+    def test_no_bundle_is_written_unless_asked_for(self, synthetic_clip):
+        args = bake._parse_args(["--source", str(synthetic_clip)])
+
+        assert args.bundle is None
+
+    def test_the_flag_takes_a_directory(self, synthetic_clip, tmp_path):
+        args = bake._parse_args(["--source", str(synthetic_clip), "--bundle", str(tmp_path)])
+
+        assert args.bundle == tmp_path
+
+    def test_it_writes_a_bundle_from_a_finished_bake(self, baked, tmp_path):
+        layout = bake.write_movie_bundle(tmp_path / "drop-in", baked)
+
+        assert layout.guide.is_file()
+        assert layout.makefile.is_file()
+        assert (layout.library / "fmv.h").is_file()
+        assert (layout.movie / "movie_data.h").is_file()
+
+    def test_the_bundle_reports_what_the_bake_measured(self, baked, tmp_path):
+        layout = bake.write_movie_bundle(tmp_path / "drop-in", baked)
+
+        text = layout.guide.read_text()
+
+        assert str(baked.result.stats.max_updates) in text
+        assert str(baked.result.stats.tile_count) in text
+
+    def test_the_bundle_carries_the_library_the_repository_holds(self, baked, tmp_path):
+        layout = bake.write_movie_bundle(tmp_path / "drop-in", baked)
+
+        assert (layout.library / "fmv.c").read_text() == (bundle.LIBRARY_ROOT / "fmv.c").read_text()
+
+
 class TestStreamBanks:
     def test_it_emits_one_stub_per_switchable_bank(self, baked):
         stubs = sorted((baked.build_dir / "generated").glob("fmv_stream__bank*.S"))
@@ -464,6 +557,34 @@ class TestCommandLine:
         assert code == 0
         assert json.loads(report.read_text())["frames"] == 11
         assert "tile_count" in capsys.readouterr().out
+
+    def test_main_emits_a_bundle_when_asked_for_one(self, synthetic_clip, tmp_path, capsys):
+        drop_in = tmp_path / "drop-in"
+
+        code = bake.main(
+            [
+                "--source",
+                str(synthetic_clip),
+                "--duration",
+                "0.2",
+                "--build-dir",
+                str(tmp_path / "build"),
+                "--palette-count",
+                "4",
+                "--candidates",
+                "0",
+                "--sample-stride",
+                "1",
+                "--bundle",
+                str(drop_in),
+            ]
+        )
+
+        assert code == 0
+        assert (drop_in / "README.md").is_file()
+        assert (drop_in / "fmv.mk").is_file()
+        assert (drop_in / bundle.LIBRARY_DIR_NAME / "fmv.h").is_file()
+        assert "drop-in bundle" in capsys.readouterr().err
 
     def test_main_honours_the_letterbox_fit(self, synthetic_clip, tmp_path):
         build = tmp_path / "build"

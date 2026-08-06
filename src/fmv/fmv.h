@@ -6,6 +6,10 @@
 #define FMV_VERSION_MAJOR 1
 #define FMV_VERSION_MINOR 0
 
+#define FMV_QUOTE_(text) #text
+#define FMV_QUOTE(text)  FMV_QUOTE_(text)
+#define FMV_VERSION_STRING FMV_QUOTE(FMV_VERSION_MAJOR) "." FMV_QUOTE(FMV_VERSION_MINOR)
+
 #define FMV_PAD_UP    0x01
 #define FMV_PAD_DOWN  0x02
 #define FMV_PAD_LEFT  0x04

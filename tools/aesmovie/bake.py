@@ -23,6 +23,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from fractions import Fraction
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any, Final
 
@@ -31,6 +32,7 @@ import numpy.typing as npt
 
 from aesmovie import (
     adpcmb,
+    bundle,
     content,
     encode,
     fixtiles,
@@ -105,6 +107,26 @@ def stride_for_epoch(*, epoch_frames: int) -> int:
 
 FIX_PALETTE_BANK: Final = 1
 S_ROM_BYTES: Final = 131072
+
+CYCLES_PER_UPDATE: Final = 64
+"""What one slot update costs in `apply_frame`'s inner loop.
+
+Read off the compiled loop rather than assumed, and the same six
+instructions the project README walks through: 12 for the port address
+reload, 12 and 16 for the two data writes, 8 for the pointer bump, 6 for
+the compare and 10 for the taken branch. It counts the per-tile loop
+only. A frame also pays a setup per run, twenty of them on a full
+keyframe, so a budget taken from this is a floor rather than a ceiling.
+"""
+
+VBLANK_CYCLES: Final = 24 * 768
+"""Cycles the blanking interval affords, at 768 cycles across 24 lines.
+
+`wait_vblank` returns at the start of blanking rather than at the tail
+of it, so a frame gets all 24 lines. Overrunning is permitted by the
+hardware and counted rather than fatal, which is why this is a budget
+and not a limit.
+"""
 
 
 def has_audio_stream(source: Path) -> bool:
@@ -205,6 +227,17 @@ _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 
 #include "fmv.h"
 
+#define MOVIE_BAKER_VERSION_MAJOR {baker_major}
+#define MOVIE_BAKER_VERSION_MINOR {baker_minor}
+#define MOVIE_BAKER_VERSION_STRING "{baker_major}.{baker_minor}"
+
+#if MOVIE_BAKER_VERSION_MAJOR != FMV_VERSION_MAJOR \\
+    || MOVIE_BAKER_VERSION_MINOR != FMV_VERSION_MINOR
+#pragma message("this movie was baked by aesmovie " MOVIE_BAKER_VERSION_STRING)
+#pragma message("the fmv library beside it is " FMV_VERSION_STRING)
+#error "baked movie and fmv library are different versions; re-bake, or replace fmv/"
+#endif
+
 #define MOVIE_FRAME_COUNT {frames}
 #define MOVIE_TILE_COUNT {tiles}
 #define MOVIE_PALETTE_COUNT {palettes}
@@ -223,6 +256,9 @@ _HEADER_TEMPLATE: Final = """#ifndef MOVIE_DATA_H
 #define MOVIE_GRID_COLS {cols}
 #define MOVIE_GRID_ROWS {rows}
 #define MOVIE_MAX_UPDATES {max_updates}
+#define MOVIE_CYCLES_PER_UPDATE {cycles_per_update}
+#define MOVIE_TICK_CYCLES {tick_cycles}
+#define MOVIE_VBLANK_CYCLES {vblank_cycles}
 #define MOVIE_STREAM_BANKS {stream_banks}
 #define MOVIE_STREAM_BYTES {stream_bytes}u
 #define MOVIE_FPS_NUM {fps_num}u
@@ -422,6 +458,40 @@ def audio_pages_per_frame(delta_n: int) -> Fraction:
     return adpcmb.exact_rate(delta_n) / (512 * frames.VBLANK_FPS)
 
 
+def write_movie_bundle(target: Path, outcome: BakeOutcome) -> bundle.BundleLayout:
+    """Emit the drop-in folder for a bake that has already run.
+
+    Every number the bundle states about the movie comes from the bake
+    that produced it rather than from a second measurement, so the guide
+    and the generated header cannot disagree about what the movie costs.
+    """
+    stats = outcome.result.stats
+    return bundle.write_bundle(
+        target=target,
+        build_dir=outcome.build_dir,
+        stream_banks=outcome.result.stream.bank_count(),
+        max_updates=stats.max_updates,
+        tick_cycles=stats.max_updates * CYCLES_PER_UPDATE,
+        tile_count=stats.tile_count,
+        palette_base=outcome.result.palette_set.base_bank,
+        first_sprite=stream_mod.FIRST_SPRITE,
+        frames=stats.frames,
+        version=baker_version(),
+    )
+
+
+def baker_version() -> tuple[int, int]:
+    """Major and minor of the installed baker, for the bundle stamp.
+
+    Patch releases are left out of the comparison deliberately. The
+    stamp exists to catch a bundle whose library and movie data drifted
+    apart, and a patch that fixes a bake without moving the data layout
+    is not that.
+    """
+    major, minor = version("aesmovie").split(".")[:2]
+    return int(major), int(minor)
+
+
 def _write_stream_banks(build_dir: Path, stream_path: Path, banks: int) -> list[Path]:
     """One `__bank`-named stub per switchable bank the stream occupies.
 
@@ -460,6 +530,7 @@ def _write_sources(
 ) -> tuple[Path, Path]:
     generated = build_dir / "generated"
     generated.mkdir(parents=True, exist_ok=True)
+    major, minor = baker_version()
 
     asm = generated / "movie_data.S"
     body = "    .section .rodata\n"
@@ -511,6 +582,11 @@ def _write_sources(
         "movie_symbol": MOVIE_SYMBOL,
         "first_sprite": stream_mod.FIRST_SPRITE,
         "stream_base_symbol": STREAM_BASE_SYMBOL,
+        "baker_major": major,
+        "baker_minor": minor,
+        "cycles_per_update": CYCLES_PER_UPDATE,
+        "tick_cycles": result.stats.max_updates * CYCLES_PER_UPDATE,
+        "vblank_cycles": VBLANK_CYCLES,
     }
 
     header = generated / "movie_data.h"
@@ -936,6 +1012,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--preview", type=Path, default=None)
     parser.add_argument("--report-json", type=Path, default=None)
+    parser.add_argument("--bundle", type=Path, default=None)
     return parser.parse_args(argv)
 
 
@@ -1101,6 +1178,9 @@ def main(argv: list[str] | None = None) -> int:
             "--quality search to measure one.",
             file=sys.stderr,
         )
+    if args.bundle is not None:
+        layout = write_movie_bundle(args.bundle, outcome)
+        print(f"wrote a drop-in bundle to {layout.root}", file=sys.stderr)
     if args.report_json is not None:
         args.report_json.parent.mkdir(parents=True, exist_ok=True)
         args.report_json.write_text(json.dumps(report, indent=2))
