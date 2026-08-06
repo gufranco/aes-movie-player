@@ -263,6 +263,62 @@ class TestGeneratedSources:
         assert "#endif" in text
 
 
+class TestStreamBanks:
+    def test_it_emits_one_stub_per_switchable_bank(self, baked):
+        stubs = sorted((baked.build_dir / "generated").glob("fmv_stream__bank*.S"))
+
+        assert len(stubs) == baked.result.stream.bank_count()
+
+    def test_every_stub_carries_the_bank_naming_convention(self, baked):
+        for stub in (baked.build_dir / "generated").glob("fmv_stream__bank*.S"):
+            assert "__bank" in stub.stem
+
+    def test_a_stub_exports_the_symbol_the_linker_places(self, baked):
+        text = (baked.build_dir / "generated" / "fmv_stream__bank0.S").read_text()
+
+        assert ".globl fmv_stream_bank0" in text
+
+    def test_a_stub_takes_its_slice_from_the_stream_blob(self, baked):
+        text = (baked.build_dir / "generated" / "fmv_stream__bank0.S").read_text()
+
+        assert f'.incbin "stream.bin", 0, {stream.PROM_BANK_BYTES}' in text
+
+    def test_each_stub_starts_where_the_one_before_it_ended(self, tmp_path):
+        stubs = bake._write_stream_banks(tmp_path, tmp_path / "stream.bin", 5)
+
+        skips = [int(stub.read_text().split(",")[1]) for stub in stubs]
+
+        assert skips == [bank * stream.PROM_BANK_BYTES for bank in range(5)]
+
+    def test_the_slices_cover_the_blob_without_a_gap_or_an_overlap(self, tmp_path):
+        stubs = bake._write_stream_banks(tmp_path, tmp_path / "stream.bin", 3)
+
+        spans = [tuple(int(part) for part in stub.read_text().split(",")[1:]) for stub in stubs]
+
+        assert spans == [
+            (0, stream.PROM_BANK_BYTES),
+            (stream.PROM_BANK_BYTES, stream.PROM_BANK_BYTES),
+            (2 * stream.PROM_BANK_BYTES, stream.PROM_BANK_BYTES),
+        ]
+
+    def test_a_stub_names_the_blob_without_a_path(self, tmp_path):
+        stubs = bake._write_stream_banks(tmp_path, tmp_path / "deep" / "stream.bin", 1)
+
+        assert '.incbin "stream.bin"' in stubs[0].read_text()
+        assert "deep" not in stubs[0].read_text()
+
+    def test_a_stub_lands_in_read_only_data(self, tmp_path):
+        stubs = bake._write_stream_banks(tmp_path, tmp_path / "stream.bin", 1)
+
+        assert ".section .rodata" in stubs[0].read_text()
+
+    def test_the_stream_base_comes_from_a_linker_symbol(self, baked):
+        text = (baked.build_dir / "generated" / "movie_data_value.c").read_text()
+
+        assert f"extern const unsigned char {bake.STREAM_BASE_SYMBOL}[];" in text
+        assert f".stream_base = (uint32_t){bake.STREAM_BASE_SYMBOL}," in text
+
+
 class TestReport:
     def test_the_report_records_the_dictionary_size(self, baked):
         report = baked.report()

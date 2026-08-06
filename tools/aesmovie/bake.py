@@ -51,6 +51,26 @@ MAX_SAMPLE_TILES: Final = 200_000
 _SCENE_CUT_SHARE: Final = 0.6
 
 MOVIE_SYMBOL: Final = "fmv_movie_data"
+STREAM_BASE_SYMBOL: Final = "fmv_stream_base"
+"""Link-time byte offset of the stream inside the switchable window.
+
+The value arrives through `--defsym` at link time rather than baked in,
+because which switchable bank the stream starts at is decided by the
+project doing the linking. A cartridge whose banks are otherwise empty
+starts it at zero; a game that already banks code of its own moves it up
+without re-baking anything.
+"""
+
+STREAM_BANK_SYMBOL: Final = "fmv_stream_bank"
+STREAM_BANK_STEM: Final = "fmv_stream__bank"
+"""File-name stem of the per-bank stubs.
+
+ngdevkit's linkscript keeps every object whose file name contains
+`__bank` out of the fixed megabyte and gathers it into `.text2`, which
+the cartridge rules turn into one switchable bank. The doubled
+underscore is the convention, not a typo.
+"""
+
 PALETTE_WORDS_PER_FRAME: Final = 48
 """How many colour words the player uploads per frame.
 
@@ -231,13 +251,15 @@ extern const fmv_movie {movie_symbol};
 _MOVIE_TEMPLATE: Final = """#include "fmv.h"
 #include "movie_data.h"
 
+extern const unsigned char {stream_base_symbol}[];
+
 const fmv_movie {movie_symbol} = {{
     .index = movie_index,
     .keyframes = movie_keyframes,
     .palettes = movie_palettes,
     .epochs = movie_epochs,
     .subtitles = movie_subtitles,
-    .stream_base = {stream_base}u,
+    .stream_base = (uint32_t){stream_base_symbol},
     .frames = {frames}u,
     .keyframe_count = {keyframes}u,
     .fps_num = {fps_num}u,
@@ -262,6 +284,13 @@ _ASM_ENTRY: Final = """    .globl {symbol}
     .balign 2
 {symbol}:
     .incbin "{path}"
+"""
+
+_STREAM_BANK_ENTRY: Final = """    .section .rodata
+    .globl {symbol}
+    .balign 2
+{symbol}:
+    .incbin "{path}", {skip}, {count}
 """
 
 
@@ -393,6 +422,33 @@ def audio_pages_per_frame(delta_n: int) -> Fraction:
     return adpcmb.exact_rate(delta_n) / (512 * frames.VBLANK_FPS)
 
 
+def _write_stream_banks(build_dir: Path, stream_path: Path, banks: int) -> list[Path]:
+    """One `__bank`-named stub per switchable bank the stream occupies.
+
+    The stream is far larger than the single megabyte the linkscript
+    gives to the switchable window, so it cannot be one object. Slicing
+    it at bank boundaries costs nothing, because the encoder already
+    pads every frame record forward rather than letting one straddle a
+    boundary, and it gives the toolchain the one shape it can place:
+    a bank is an object, and an object is a link.
+    """
+    generated = build_dir / "generated"
+    generated.mkdir(parents=True, exist_ok=True)
+    stubs: list[Path] = []
+    for bank in range(banks):
+        stub = generated / f"{STREAM_BANK_STEM}{bank}.S"
+        stub.write_text(
+            _STREAM_BANK_ENTRY.format(
+                symbol=f"{STREAM_BANK_SYMBOL}{bank}",
+                path=stream_path.name,
+                skip=bank * stream_mod.PROM_BANK_BYTES,
+                count=stream_mod.PROM_BANK_BYTES,
+            )
+        )
+        stubs.append(stub)
+    return stubs
+
+
 def _write_sources(
     build_dir: Path,
     outcome_paths: dict[str, Path],
@@ -454,7 +510,7 @@ def _write_sources(
         "subtitle_lines": subtitles.MAX_LINES,
         "movie_symbol": MOVIE_SYMBOL,
         "first_sprite": stream_mod.FIRST_SPRITE,
-        "stream_base": 0,
+        "stream_base_symbol": STREAM_BASE_SYMBOL,
     }
 
     header = generated / "movie_data.h"
@@ -827,6 +883,10 @@ def run(request: BakeRequest) -> BakeOutcome:
     )
     artifacts["asm"] = asm
     artifacts["header"] = header
+    for bank, stub in enumerate(
+        _write_stream_banks(request.build_dir, artifacts["stream"], result.stream.bank_count())
+    ):
+        artifacts[f"stream_bank{bank}"] = stub
 
     if request.preview is not None:
         artifacts["preview"] = request.preview

@@ -92,32 +92,74 @@ python3 tools/scripts/check_vram_timing.py "$BUILD/main.o" "$BUILD/menu.o" \
 echo "AS $GENERATED/movie_data.S"
 retry_build m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "$GENERATED/movie_data.S" -o "$BUILD/movie_data.o"
 
-echo "LD $BUILD/rom.elf"
-retry_build m68k-neogeo-elf-gcc -o "$BUILD/rom.elf" "$BUILD/main.o" "$BUILD/menu.o" "$BUILD/fmv.o" "$BUILD/fmv_audio.o" "$BUILD/timeline.o" "$BUILD/movie_data_value.o" "$BUILD/movie_data.o" \
-    -Wl,-Map="$BUILD/rom.map" "${NGDEVKIT_LIBS[@]}"
-
-echo "[ram] section sizes:"
-m68k-neogeo-elf-size "$BUILD/rom.elf" || true
-
 FIXED_ROM_BYTES=1048576
-m68k-neogeo-elf-objcopy -O binary -S -R .text2 --gap-fill 0xff \
-    "$BUILD/rom.elf" "$ROM/p1.raw"
-RAW_SIZE=$(file_size "$ROM/p1.raw")
+BANK_WINDOW=2097152
+BANK_LIMIT=8
+STREAM_FIRST_BANK=0
 STREAM_SIZE=$(file_size "$BAKED/stream.bin")
 STREAM_BANKS=$((STREAM_SIZE / FIXED_ROM_BYTES))
-echo "[prom] code and tables $RAW_SIZE bytes of $FIXED_ROM_BYTES fixed"
-echo "[prom] stream $STREAM_SIZE bytes in $STREAM_BANKS switchable bank(s)"
-if [[ "$RAW_SIZE" -gt "$FIXED_ROM_BYTES" ]]; then
-    echo "P-ROM overflow: $RAW_SIZE bytes exceeds the $FIXED_ROM_BYTES byte fixed region" >&2
-    exit 1
-fi
 if [[ $((STREAM_SIZE % FIXED_ROM_BYTES)) -ne 0 ]]; then
     echo "stream is not a whole number of banks: $STREAM_SIZE bytes" >&2
     exit 1
 fi
-cp "$ROM/p1.raw" "$ROM/p1.p1"
+if [[ $((STREAM_FIRST_BANK + STREAM_BANKS)) -gt "$BANK_LIMIT" ]]; then
+    echo "stream ends past bank $BANK_LIMIT, which the three-bit latch cannot reach" >&2
+    exit 1
+fi
+
+COMMON_OBJECTS=(
+    "$BUILD/main.o" "$BUILD/menu.o" "$BUILD/fmv.o" "$BUILD/fmv_audio.o"
+    "$BUILD/timeline.o" "$BUILD/movie_data_value.o" "$BUILD/movie_data.o"
+)
+BANK_IMAGES=()
+
+for ((bank = 0; bank < STREAM_BANKS; bank++)); do
+    stub="$GENERATED/fmv_stream__bank$bank.S"
+    object="$BUILD/fmv_stream__bank$bank.o"
+    elf="$BUILD/rom-bank$bank.elf"
+    image="$BUILD/p2-bank$bank.bin"
+
+    echo "AS $stub"
+    retry_build m68k-neogeo-elf-gcc "${CFLAGS[@]}" -c "$stub" -o "$object"
+    m68k-neogeo-elf-objcopy -R .text -R .data -R .bss "$object"
+    echo "LD $elf"
+    retry_build m68k-neogeo-elf-gcc -o "$elf" "${COMMON_OBJECTS[@]}" "$object" \
+        -Wl,--defsym="fmv_stream_base=$((STREAM_FIRST_BANK * FIXED_ROM_BYTES))" \
+        -Wl,-Map="$BUILD/rom-bank$bank.map" "${NGDEVKIT_LIBS[@]}"
+
+    placed=$(m68k-neogeo-elf-nm "$elf" | awk -v want="fmv_stream_bank$bank" '$3 == want {print $1}')
+    if [[ "$placed" != "00200000" ]]; then
+        echo "stream bank $bank sits at 0x${placed:-?}, not at the start of the switchable window" >&2
+        echo "something else was linked into .text2 ahead of it" >&2
+        exit 1
+    fi
+    m68k-neogeo-elf-objcopy -O binary -j .text2 --gap-fill 0x00 \
+        --pad-to $((BANK_WINDOW + FIXED_ROM_BYTES)) "$elf" "$image"
+    if [[ "$(file_size "$image")" -ne "$FIXED_ROM_BYTES" ]]; then
+        echo "switchable bank $bank came out $(file_size "$image") bytes, not $FIXED_ROM_BYTES" >&2
+        exit 1
+    fi
+    BANK_IMAGES+=("$image")
+done
+
+cp -f "$BUILD/rom-bank0.elf" "$BUILD/rom.elf"
+cp -f "$BUILD/rom-bank0.map" "$BUILD/rom.map"
+
+echo "[ram] section sizes:"
+m68k-neogeo-elf-size -A "$BUILD/rom.elf" | awk '$1 !~ /^\.debug/' || true
+
+m68k-neogeo-elf-objcopy -O binary -S -R .text2 --gap-fill 0xff \
+    "$BUILD/rom.elf" "$ROM/p1.raw"
+RAW_SIZE=$(file_size "$ROM/p1.raw")
+echo "[prom] code and tables $RAW_SIZE bytes of $FIXED_ROM_BYTES fixed"
+echo "[prom] stream $STREAM_SIZE bytes in $STREAM_BANKS switchable bank(s) from bank $STREAM_FIRST_BANK"
+if [[ "$RAW_SIZE" -gt "$FIXED_ROM_BYTES" ]]; then
+    echo "P-ROM overflow: $RAW_SIZE bytes exceeds the $FIXED_ROM_BYTES byte fixed region" >&2
+    exit 1
+fi
+cp -f "$ROM/p1.raw" "$ROM/p1.p1"
 set_file_size "$ROM/p1.p1" "$FIXED_ROM_BYTES"
-cat "$BAKED/stream.bin" >> "$ROM/p1.p1"
+cat "${BANK_IMAGES[@]}" >> "$ROM/p1.p1"
 dd if="$ROM/p1.p1" of="$ROM/p1.p1" conv=notrunc,swab status=none
 
 if [[ -f "$GENERATED/audio_params.s" ]]; then
