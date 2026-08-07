@@ -218,26 +218,22 @@ allocates a delta-T region only when a software list names
 `ymsnd:adpcmb`. A soundtrack packaged that way is silent, so the movie's
 voice ROM does not travel through it.
 
-`{packager_dir}/` carries two packagers that can express it. They need
-only a standard Python, and they read a directory of ROM images under
-the names the containers use:
+`{packager_dir}/` carries the packagers that can, and a script that
+drives them. It needs only a standard Python:
 
 ```bash
-mkdir -p out
-cp build/rom/<game>-p1.p1 out/p1.p1
-cp build/rom/<game>-s1.s1 out/s1.s1
-cp build/rom/<game>-m1.m1 out/m1.m1
-cp build/rom/<game>-c1.c1 out/c1.c1
-cp build/rom/<game>-c2.c2 out/c2.c2
-: > out/v11.v1 && truncate -s 524288 out/v11.v1
-cp fmv/{movie_dir}/v2.bin out/v21.v2
-
-python3 fmv/{packager_dir}/neofile.py  --rom-dir out --output game.neo
-python3 fmv/{packager_dir}/mamecart.py --rom-dir out --output game.zip
+bash fmv/{packager_dir}/package.sh build/rom <game-name> mygame
 ```
 
-`game.neo` is what a NeoSD loads. `mamecart.py` also writes the software
-list MAME needs, with the ADPCM-B region declared.
+That writes `mygame.neo`, which is what a NeoSD loads, and `mygame.zip`
+with the software list MAME needs, ADPCM-B region declared.
+
+Use the script rather than assembling the ROM set by hand. The containers
+take a single program ROM holding the fixed megabyte followed by every
+switchable bank, while an ngdevkit project builds those as two files.
+Joining them is the step that is easy to miss, and missing it costs the
+movie its command stream: the cartridge boots, the soundtrack plays, and
+the screen stays blank.
 
 ## Version
 

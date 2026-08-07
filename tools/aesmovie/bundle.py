@@ -53,6 +53,7 @@ MAME allocates a delta-T region only when a software list names
 two are standard-library only and travel with the bundle."""
 
 PACKAGER_DIR_NAME: Final = "package"
+PACKAGER_SCRIPT: Final = "package.sh"
 
 BAKED_ASSETS: Final = (
     "index.bin",
@@ -154,6 +155,9 @@ def write_bundle(
     packagers = target / PACKAGER_DIR_NAME
     packagers.mkdir(parents=True, exist_ok=True)
     _copy_all(PACKAGERS, PACKAGER_ROOT, packagers, required=True)
+    script = packagers / PACKAGER_SCRIPT
+    script.write_text(_render(PACKAGER_SCRIPT, {"movie_dir": MOVIE_DIR_NAME}), encoding="utf-8")
+    script.chmod(0o755)
 
     banks = sorted(generated.glob(STREAM_BANK_GLOB))
     if len(banks) != stream_banks:

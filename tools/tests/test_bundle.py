@@ -174,11 +174,31 @@ class TestThePackagers:
         for name in bundle.PACKAGERS:
             assert (layout.root / bundle.PACKAGER_DIR_NAME / name).is_file(), name
 
+    def test_it_carries_the_script_that_drives_them(self, tmp_path):
+        layout = _write(tmp_path)
+        script = layout.root / bundle.PACKAGER_DIR_NAME / bundle.PACKAGER_SCRIPT
+
+        assert script.is_file()
+        assert script.stat().st_mode & 0o111
+
+    def test_the_script_joins_both_program_roms(self, tmp_path):
+        layout = _write(tmp_path)
+        text = (layout.root / bundle.PACKAGER_DIR_NAME / bundle.PACKAGER_SCRIPT).read_text()
+
+        assert "$ROM_DIR/$GAME-p2.p2" in text
+        assert '>> "$STAGE/p1.p1"' in text
+
+    def test_the_script_finds_the_movie_beside_it(self, tmp_path):
+        layout = _write(tmp_path)
+        text = (layout.root / bundle.PACKAGER_DIR_NAME / bundle.PACKAGER_SCRIPT).read_text()
+
+        assert f'MOVIE="$HERE/../{bundle.MOVIE_DIR_NAME}"' in text
+
     def test_the_guide_says_why_they_are_there(self, tmp_path):
         text = _write(tmp_path).guide.read_text()
 
         assert "ymsnd:adpcmb" in text
-        assert "package/neofile.py" in text
+        assert "package.sh" in text
 
 
 class TestRomImageSizes:

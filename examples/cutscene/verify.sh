@@ -68,9 +68,20 @@ capture_at() {
     cp -f "$shot" "$target"
 }
 
-echo "[run] the cutscene through to the caller's own screen"
+MIDPOINT_SECONDS=$((BOOT_ALLOWANCE + MOVIE_SECONDS / 2))
+
+echo "[run] the cutscene, mid-playback and after it returns"
+capture_at "$MIDPOINT_SECONDS" "$STAGE/shots/playing.png"
 capture_at "$SETTLED_SECONDS" "$STAGE/shots/settled.png"
 capture_at "$STILL_SECONDS" "$STAGE/shots/still.png"
+
+if ! uv --project "$ROOT/tools" run python "$ROOT/tools/scripts/verify_capture.py" \
+        --capture "$STAGE/shots/playing.png" --preview "$PREVIEW" \
+        --overscan 0 --max-mean-error 8 --min-separation 0 >/dev/null 2>&1; then
+    echo "FAIL: mid-playback the screen matches no frame of the movie, so it never drew" >&2
+    exit 1
+fi
+echo "the movie is on screen while it plays"
 
 if ! cmp -s "$STAGE/shots/settled.png" "$STAGE/shots/still.png"; then
     echo "FAIL: the screen kept changing after the cutscene returned" >&2
@@ -80,7 +91,7 @@ echo "the caller's screen is stable across $((STILL_SECONDS - SETTLED_SECONDS)) 
 
 if uv --project "$ROOT/tools" run python "$ROOT/tools/scripts/verify_capture.py" \
         --capture "$STAGE/shots/settled.png" --preview "$PREVIEW" \
-        --overscan 0 --max-mean-error 8 >/dev/null 2>&1; then
+        --overscan 0 --max-mean-error 8 --min-separation 0 >/dev/null 2>&1; then
     echo "FAIL: the screen still matches a frame of the movie" >&2
     exit 1
 fi
