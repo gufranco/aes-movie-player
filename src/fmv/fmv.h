@@ -3,8 +3,8 @@
 
 #include <stdint.h>
 
-#define FMV_VERSION "1.0.0"
-#define FMV_VERSION_MAJOR 1
+#define FMV_VERSION "2.0.0"
+#define FMV_VERSION_MAJOR 2
 #define FMV_VERSION_MINOR 0
 
 #define FMV_QUOTE_(text) #text

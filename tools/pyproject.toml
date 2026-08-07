@@ -1,6 +1,6 @@
 [project]
 name = "aesmovie"
-version = "1.0.0"
+version = "2.0.0"
 description = "Offline baker that turns a video file into a Neo Geo AES cartridge movie ROM"
 requires-python = ">=3.12"
 dependencies = [
