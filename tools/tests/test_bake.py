@@ -5,6 +5,7 @@ import importlib.util
 import itertools
 import json
 import subprocess
+from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
@@ -305,7 +306,15 @@ class TestVersionStamp:
         assert "FMV_VERSION_STRING)" in text
 
     def test_the_baker_version_is_the_installed_one(self):
-        assert bake.baker_version() == (1, 0)
+        major, minor = version("aesmovie").split(".")[:2]
+
+        assert bake.baker_version() == (int(major), int(minor))
+
+    def test_the_baker_version_is_a_pair_of_numbers(self):
+        major, minor = bake.baker_version()
+
+        assert isinstance(major, int)
+        assert isinstance(minor, int)
 
     def test_the_library_header_carries_the_same_version_as_the_package(self):
         header = (bundle.LIBRARY_ROOT / "fmv.h").read_text()
