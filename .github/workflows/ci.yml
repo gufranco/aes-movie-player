@@ -170,8 +170,15 @@ jobs:
           BUNDLE=$PWD/build/bundle WORK=$PWD/build/example-audio FMV_AUDIO=yes \
             bash examples/cutscene/build.sh
           rom=build/example-audio/cutscene/build/rom
-          cmp "$rom/ngdevkit-m1.m1" build/rom/m1.m1
-          echo "the sound driver built from the bundle matches the cartridge's own"
+          share=$(pkg-config --variable=prefix ngdevkit)/share/ngdevkit
+          z80-neogeo-ihx-sdobjcopy -I ihex -O binary \
+            "$share/nullsound_driver.ihx" /tmp/nullsound.m1 --pad-to 131072
+          test "$(wc -c < "$rom/ngdevkit-m1.m1")" -eq 131072
+          if cmp -s "$rom/ngdevkit-m1.m1" /tmp/nullsound.m1; then
+            echo "the cartridge carries ngdevkit's empty driver, not the movie's" >&2
+            exit 1
+          fi
+          echo "the movie's own sound driver built from the bundle"
 
       - uses: actions/upload-artifact@v7.0.1
         with:
