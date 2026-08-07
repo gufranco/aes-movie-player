@@ -8,6 +8,7 @@ was paid for once and does not need paying for again.
 
 ## Contents
 
+- [A blank screen that was not the library's fault](#a-blank-screen-that-was-not-the-librarys-fault)
 - [Three registers that cannot be read](#three-registers-that-cannot-be-read)
 - [A verification gate that was guessing](#a-verification-gate-that-was-guessing)
 - [One ladder cannot price every film](#one-ladder-cannot-price-every-film)
@@ -17,6 +18,39 @@ was paid for once and does not need paying for again.
 - [It plays on a board](#it-plays-on-a-board)
 - [What is left](#what-is-left)
 - [Standing rules for this project](#standing-rules-for-this-project)
+
+## A blank screen that was not the library's fault
+
+The integration guide told a developer how to package a cartridge by hand,
+and the steps were wrong. The containers take a single program ROM holding
+the fixed megabyte followed by every switchable bank, which is how this
+repository's own build writes it. An ngdevkit project builds those as two
+files. The steps copied the first and never mentioned the second.
+
+The result is a cartridge that boots, plays its soundtrack, and shows a
+blank screen, because the movie's command stream was never in it. Every
+part looks healthy: the ROM images are all present and correct sizes, the
+sound driver is byte-identical to the one that works, and the cartridge
+runs to completion and returns to the caller's screen on time.
+
+Two things made this expensive to find.
+
+The acceptance check could not see it. It asserted that the caller's screen
+settles after the cutscene and no longer matches any frame of the movie. A
+screen that never drew passes both. The check now captures mid-playback and
+requires a movie frame to be on screen, which is the assertion whose absence
+allowed a broken guide to be called proven.
+
+And the first diagnosis was wrong. The blank was blamed on the audio path,
+because the failing run had sound and the working ones did not. The working
+ones were also packaged by a different tool, and that was the variable. Six
+experiments were run before anyone compared the two cartridges directly, at
+which point every ROM region turned out identical and the fault had to be
+outside the cartridge. Diffing the artifacts is cheaper than reasoning about
+them, and it should have come first.
+
+The steps are gone. The bundle carries a script that assembles the ROM set,
+so the part that is easy to get wrong is not asked of anyone.
 
 ## Three registers that cannot be read
 
