@@ -9,7 +9,7 @@ And a library that puts one inside your own game.</strong>
 
 [![Licence](https://img.shields.io/badge/licence-GPL--3.0-blue?style=flat-square)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-902%20passing-brightgreen?style=flat-square)](tools/tests)
-[![Hardware](https://img.shields.io/badge/runs%20on-real%20AES%20%2B%20MVS-success?style=flat-square)](#on-real-hardware)
+[![Hardware](https://img.shields.io/badge/cartridge%20and%20library-run%20on%20real%20AES-success?style=flat-square)](#on-real-hardware)
 [![Target](https://img.shields.io/badge/target-Neo%20Geo%20AES-red?style=flat-square)](#hardware-ceilings)
 [![Verified](https://img.shields.io/badge/verified-geolith%20%2B%20MAME-blueviolet?style=flat-square)](#verification)
 
@@ -859,6 +859,35 @@ And a clean run is not a cycle measurement, so the write-spacing minimums
 stay sourced from documentation and enforced by
 [the build gate](#hardware-notes-worth-knowing) rather than confirmed by
 observation.
+
+#### The library gives the machine back on silicon
+
+The [cutscene example](examples/cutscene) has since run on a board too, and
+came back to its own title screen normally after the movie.
+
+That sentence is worth more than it looks. The example redraws its title by
+writing fix tiles and nothing else: no palette upload, no register setup, no
+re-initialisation of any kind. For that screen to appear, the fix source, the
+palette bank and the LSPC mode all have to be where the caller left them,
+which means `fmv_close` restored them correctly.
+
+No emulator can settle that. Those registers are write-only, so a run in a
+model proves only that the model and the library agree about values neither
+of them can read back. The library had a defect here that both emulators
+were happy with: it saved three registers by reading them, which returns a
+prefetched opcode on the real machine, and wrote the result back on the way
+out. A board is the only judge available.
+
+| Claim | What this run settles |
+|---|---|
+| `fmv_close` restoring the caller's machine state | The four write-only registers come back where the caller put them, on silicon |
+| The bundle as an integration path | A cartridge built from an emitted folder in a stock ngdevkit project runs on a board |
+| The renderer after the split | The library drives a real LSPC, not only a model of one |
+
+What it does not settle. The run covers the example as it builds by default,
+which is video-only, so the soundtrack path is still emulator-tested alone.
+And it is one run of a thirty second clip, where the movie cartridge above is
+ten minutes; length is where drift and bank crossings show up.
 
 ## Hardware notes worth knowing
 
