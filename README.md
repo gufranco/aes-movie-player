@@ -8,7 +8,7 @@ And a library that puts one inside your own game.</strong>
 <br>
 
 [![Licence](https://img.shields.io/badge/licence-GPL--3.0-blue?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-902%20passing-brightgreen?style=flat-square)](tools/tests)
+[![Tests](https://img.shields.io/badge/tests-943%20passing-brightgreen?style=flat-square)](tools/tests)
 [![Hardware](https://img.shields.io/badge/cartridge%20and%20library-run%20on%20real%20AES-success?style=flat-square)](#on-real-hardware)
 [![Target](https://img.shields.io/badge/target-Neo%20Geo%20AES-red?style=flat-square)](#hardware-ceilings)
 [![Verified](https://img.shields.io/badge/verified-geolith%20%2B%20MAME-blueviolet?style=flat-square)](#verification)
@@ -27,7 +27,7 @@ And a library that puts one inside your own game.</strong>
 
 <div align="center">
 
-**158 MB** cartridge · **35,274** frames · **59.2** fps · **846,784** tiles · **81%** of the C-ROM ceiling · **902** tests
+**158 MB** cartridge · **35,274** frames · **59.2** fps · **846,784** tiles · **81%** of the C-ROM ceiling · **943** tests
 
 <br>
 
@@ -48,7 +48,9 @@ cartridge that plays it, with a transport, subtitles and sound. Start at
 **A library for your own game.** The same renderer, packaged so a
 homebrew developer can drop a cutscene into a game they are already
 building. One blocking call owns the screen while the movie plays and
-hands every register back afterwards. Start at
+hands every register back afterwards, which
+[a real AES has now confirmed](#the-library-gives-the-machine-back-on-silicon).
+Its surface is a [promise from 2.0](#the-c-library). Start at
 [A movie inside your own game](#a-movie-inside-your-own-game).
 
 The cartridge is built on the library rather than beside it, so anything
@@ -1223,36 +1225,45 @@ full measurement is in the [development log](CHANGELOG.md#what-did-not-work).
 
 ## What is stable
 
-From 1.0 these are a promise. They keep working, and anything that would break
+From 2.0 these are a promise. They keep working, and anything that would break
 them is a major version.
 
 | Surface | Promise |
 |:--------|:--------|
 | `python -m aesmovie.cartridge <source>` | The one command. Its flags keep their names and meanings: `--subtitles`, `--quality`, `--tier-cache`, `--start`, `--duration`, `--build-dir`, `--preview`, `--fit`, `--dither`, `--bake-only` |
 | `python -m aesmovie.plan --source <file>` | Prints the ladder as an estimate and bakes nothing |
+| `python -m aesmovie.bake --bundle DIR` | Emits a drop-in folder. Its shape keeps its names: `src/`, `movie/`, `package/`, `fmv.mk`, `README.md` |
 | Rung names `q01` to `q35` | A name always means the same settings. Rungs are never renumbered |
 | `aesmovie-tiers.json` | Readable, diffable, and safe to commit. Its `version` field guards the shape |
 | `build/aesmovie.neo` and `build/aesmovie.zip` | Where the cartridge lands, and what it is called |
 | Exit codes | 0 on success, non-zero on failure, and a distinct code when a bake ran out of dictionary |
 
-Three things are deliberately not promised. `python -m aesmovie.bake` is the
-low-level baker and carries knobs that exist to be experimented with, so its
-surface can move. The numbers a bake reports in `report.json` are measurements
-rather than an interface; fields may be added, and what they mean is defined by
-the code that computes them.
+### The C library
 
-The C library is the third. `fmv.h` is new and has not been through a
-release yet, so its shape can still move: `fmv_options` gained four
-fields once already, when the registers it claimed to restore turned out
-not to be readable. What protects a developer in the meantime is the
-version stamp rather than a promise, since the emitted folder carries the
-library source it was baked against and a mismatch fails the build with
-both versions named.
+New in 2.0, and the reason it is a major version. The functions in
+[`fmv.h`](src/fmv/fmv.h) are the surface:
 
-The functions in `fmv.h` are what a promise would eventually cover. The
-structs are declared so a caller can allocate them, not so it can read
-them, and every field a caller has needed so far has an accessor. Read
-the guide in the folder you hold rather than this page.
+| Promised | Not promised |
+|:---------|:-------------|
+| `fmv_defaults`, `fmv_play` | The layout of `fmv_movie` and `fmv_player`. They are declared so a caller can allocate them, not so it can read them |
+| `fmv_open`, `fmv_start`, `fmv_tick`, `fmv_hold`, `fmv_pause`, `fmv_resume`, `fmv_seek`, `fmv_close` | Anything under `src/fmv/` other than `fmv.h`. `hw.h` is internal and moves without notice |
+| `fmv_ended`, `fmv_position`, `fmv_last_updates`, `fmv_epoch`, `fmv_stream_bank` | The `MOVIE_` defines in the generated header, which describe one bake rather than an interface |
+| The fields of `fmv_options`, and their defaults | |
+| The `fmv.mk` variables a project reads: `FMV_OBJS`, `FMV_CFLAGS`, `FMV_LDFLAGS`, `FMV_CROM_BYTES`, `FMV_PROM2_BYTES`, `FMV_VROM_BYTES`, `FMV_FIRST_FREE_TILE`, `FMV_FIRST_BANK`, `FMV_AUDIO` | |
+
+Every field a caller has needed so far has an accessor, which is what lets
+the structs stay unpromised while the functions do not move.
+
+The version stamp stays regardless of the promise. An emitted folder carries
+the library source it was baked against, and compiling one against the other
+across a major version stops the build with both versions named, rather than
+letting a mismatch turn into a blank screen.
+
+Two things remain deliberately outside all of this. `python -m aesmovie.bake`
+carries knobs that exist to be experimented with, so its surface can move
+apart from `--bundle`. The numbers a bake reports in `report.json` are
+measurements rather than an interface; fields may be added, and what they mean
+is defined by the code that computes them.
 
 ## Repository layout
 
