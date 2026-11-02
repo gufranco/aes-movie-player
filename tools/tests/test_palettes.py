@@ -178,6 +178,76 @@ class TestBuildPaletteSet:
         # Assert
         assert "empty" in str(refused.value)
 
+    def test_heavy_near_duplicate_shades_do_not_crowd_out_a_bright_group(self):
+        # Arrange
+        tiles = crowded_tiles()
+
+        # Act
+        palette_set = built(tiles, 1)
+
+        # Assert
+        error = palettes.PaletteAssigner(palette_set).assign(tiles).error.sum()
+        assert error < CROWDED_ERROR_CEILING
+
+
+CROWDED_ERROR_CEILING = 0.04
+WORSE_MIGRATION_SEED = 52
+BLOB_RADIUS = 0.01
+
+
+def crowded_blob() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    blob = np.random.default_rng(SEED).normal(0.0, 0.001, (60, 3))
+    far = np.stack(
+        [[0.2 + 0.05 * step, 0.3 * (step % 3 - 1), 0.3 * (step % 2 * 2 - 1)] for step in range(15)]
+    )
+    lab = np.concatenate([blob, far]).astype(np.float32)
+    centroids = np.concatenate([blob[:11], far[:4]]).astype(np.float32)
+    return lab, np.ones(lab.shape[0], dtype=np.float64), centroids
+
+
+def histogram(seed: int) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    drawn = int(rng.integers(16, 60))
+    colours = np.unique(rng.integers(0, 32768, drawn)).astype(np.uint16)
+    counts = rng.integers(1, 200, colours.size)
+    if rng.random() < 0.5:
+        counts[: max(1, colours.size // 3)] *= 40
+    return palettes.oklab_grid()[colours], counts.astype(np.float64)
+
+
+class TestMigration:
+    def test_centroids_crowded_into_one_blob_move_out_one_a_round(self):
+        # Arrange
+        lab, weight, centroids = crowded_blob()
+
+        # Act
+        moved = palettes._migrated(lab, weight, centroids, np.random.default_rng(SEED))
+
+        # Assert
+        in_blob = np.linalg.norm(moved, axis=1) < BLOB_RADIUS
+        assert int(in_blob.sum()) == 11 - palettes.MIGRATION_ROUNDS
+
+    def test_a_migration_that_would_raise_the_cost_is_discarded(self):
+        # Arrange
+        lab, weight = histogram(WORSE_MIGRATION_SEED)
+        rng = np.random.default_rng(0)
+        heaviest = lab[np.argsort(-weight)[:15]].astype(np.float32)
+        centroids = palettes._converged(lab, weight, heaviest, rng)
+
+        # Act
+        moved = palettes._migrated(lab, weight, centroids, rng)
+
+        # Assert
+        assert np.array_equal(moved, centroids)
+
+
+def crowded_tiles() -> np.ndarray:
+    dark = [color(1, 1, shade) for shade in range(18)]
+    bright = [color(31 - (step % 6), 20 + step // 6, 2) for step in range(8)]
+    flat = np.array(dark * 20 + bright, dtype=np.uint16)
+    flat = np.concatenate([flat, flat[: (-flat.size) % 256]])
+    return flat.reshape(-1, 16, 16)
+
 
 class TestAssignment:
     def test_pixel_indices_stay_inside_the_usable_palette_slots(self):

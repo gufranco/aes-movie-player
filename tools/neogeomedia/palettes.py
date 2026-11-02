@@ -172,13 +172,65 @@ def _fit_palette(
     weight = counts.astype(np.float64)
     rng = np.random.default_rng(seed)
     order = np.argsort(-weight)
-    centroids = lab[order[:PALETTE_SLOTS]].astype(np.float32)
-    for _ in range(_KMEANS_ITERATIONS):
-        if not _refine(lab, weight, centroids, rng):
-            break
+    centroids = _converged(lab, weight, lab[order[:PALETTE_SLOTS]].astype(np.float32), rng)
+    centroids = _migrated(lab, weight, centroids, rng)
 
     chosen = colors[np.argmin(_sqdist(lab, centroids), axis=0)]
     return chosen.astype(np.uint16)
+
+
+def _converged(
+    lab: npt.NDArray[np.float32],
+    weight: npt.NDArray[np.float64],
+    centroids: npt.NDArray[np.float32],
+    rng: np.random.Generator,
+) -> npt.NDArray[np.float32]:
+    moving = centroids.copy()
+    for _ in range(_KMEANS_ITERATIONS):
+        if not _refine(lab, weight, moving, rng):
+            break
+    return moving
+
+
+MIGRATION_ROUNDS: Final = 10
+MIGRATION_FACTOR: Final = 0.5
+
+
+def _cluster_costs(
+    lab: npt.NDArray[np.float32],
+    weight: npt.NDArray[np.float64],
+    centroids: npt.NDArray[np.float32],
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.float64], npt.NDArray[np.float64], float]:
+    distance = _sqdist(lab, centroids).astype(np.float64)
+    nearest = np.argmin(distance, axis=1)
+    near = distance[np.arange(lab.shape[0]), nearest]
+    second = np.partition(distance, 1, axis=1)[:, 1]
+    cost = np.bincount(nearest, weights=weight * near, minlength=PALETTE_SLOTS)
+    removal = np.bincount(nearest, weights=weight * (second - near), minlength=PALETTE_SLOTS)
+    return nearest, cost, removal, float((weight * near).sum())
+
+
+def _migrated(
+    lab: npt.NDArray[np.float32],
+    weight: npt.NDArray[np.float64],
+    centroids: npt.NDArray[np.float32],
+    rng: np.random.Generator,
+) -> npt.NDArray[np.float32]:
+    best = centroids
+    for _ in range(MIGRATION_ROUNDS):
+        nearest, cost, removal, total = _cluster_costs(lab, weight, best)
+        worst, weakest = int(np.argmax(cost)), int(np.argmin(removal))
+        if worst == weakest or removal[weakest] >= MIGRATION_FACTOR * cost[worst]:
+            break
+        members = np.flatnonzero(nearest == worst)
+        spread = weight[members] * ((lab[members] - best[worst]) ** 2).sum(axis=1)
+        trial = best.copy()
+        trial[weakest] = lab[members[int(np.argmax(spread))]]
+        trial = _converged(lab, weight, trial, rng)
+        if _cluster_costs(lab, weight, trial)[3] >= total:
+            break
+        best = trial
+    return best
 
 
 def _cluster_palettes(
@@ -236,20 +288,17 @@ class PaletteAssigner:
         total = len(palette_set)
         self._slot = np.zeros((total, grid.shape[0]), dtype=np.uint8)
         self._error = np.zeros((total, grid.shape[0]), dtype=np.float32)
-        dithered = dither > NO_DITHER
-        self._second = np.zeros((total, grid.shape[0]), dtype=np.uint8) if dithered else None
-        self._mix = np.zeros((total, grid.shape[0]), dtype=np.uint8) if dithered else None
+        picks = (total, grid.shape[0], ordered.PATTERN_CANDIDATES)
+        self._pattern = np.zeros(picks, dtype=np.uint8) if dither > NO_DITHER else None
         for index in range(total):
             palette_lab = grid[palette_set.colors[index]]
             distance = ((grid[:, None, :] - palette_lab[None, :, :]) ** 2).sum(axis=2)
             self._slot[index] = np.argmin(distance, axis=1).astype(np.uint8)
             self._error[index] = np.min(distance, axis=1).astype(np.float32)
-            if self._second is not None and self._mix is not None:
-                spacing = ((palette_lab[:, None, :] - palette_lab[None, :, :]) ** 2).sum(axis=2)
-                nearest, runner, share = ordered.two_nearest(distance, spacing, dither)
-                self._slot[index] = nearest
-                self._second[index] = runner
-                self._mix[index] = share
+            if self._pattern is not None:
+                self._pattern[index] = ordered.pattern_candidates(
+                    grid, palette_lab, strength=dither
+                )
         self._threshold = ordered.bayer_thresholds(TILE_PX).reshape(TILE_PIXELS)
         self._chunk = max(1, _ASSIGN_CHUNK_BYTES // (self._candidates * TILE_PIXELS * 4))
 
@@ -293,12 +342,10 @@ class PaletteAssigner:
     def _quantise(
         self, chosen: npt.NDArray[np.int64], pixels: npt.NDArray[np.uint16]
     ) -> npt.NDArray[np.uint8]:
-        nearest = self._slot[chosen[:, None], pixels]
-        if self._second is None or self._mix is None:
-            return nearest
-        share = self._mix[chosen[:, None], pixels]
-        runner = self._second[chosen[:, None], pixels]
-        return ordered.mix(nearest, runner, share, self._threshold[None, :])
+        if self._pattern is None:
+            return self._slot[chosen[:, None], pixels]
+        candidates = self._pattern[chosen[:, None], pixels]
+        return ordered.pattern_pick(candidates, self._threshold[None, :])
 
     def _shortlist(self, tiles: npt.NDArray[np.uint16]) -> npt.NDArray[np.int64]:
         total = len(self._palette_set)

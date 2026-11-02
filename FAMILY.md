@@ -240,7 +240,10 @@ That choice has a price, paid deliberately:
   colour channel takes each by its share of light, never by its code value.
   The core's two-entry palette mix weighs by Oklab distance: weighing it by
   light measured 0.3% to 1.6% worse on the Game Gear, because the entries it
-  mixes sit close together.
+  mixes sit close together. The Neo Geo draws its opt-in dither through the
+  core's four-pick pattern dither instead, which beat the two-entry mix on
+  all six of its films; on the Master System and the Game Gear it lost or
+  split in every form measured, so they keep the two-entry mix.
 - **Nothing aimed at a CRT.** A dither is allowed when it raises the picture's
   quality on a sharp screen. No composite model and no technique that needs a
   display to blend colours the console cannot show.

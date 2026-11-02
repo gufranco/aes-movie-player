@@ -13,6 +13,8 @@ def greys(*levels: int) -> np.ndarray:
 
 BLACK, MID_GREY, WHITE = (int(index) for index in greys(0, 128, 255))
 THREE_ENTRIES = [BLACK, MID_GREY, WHITE]
+RED, GREEN, BLUE = 31 << 10, 31 << 5, 31
+DIM_GREY = (15 << 10) | (15 << 5) | 15
 
 
 def a_ramp_tile(low: int, high: int) -> np.ndarray:
@@ -80,6 +82,17 @@ class TestItActuallyDithers:
 
         # Assert
         assert len(np.unique(out.nibbles)) == 1
+
+    def test_a_colour_no_pair_of_entries_brackets_is_drawn_from_three(self):
+        # Arrange
+        primaries = [RED, GREEN, BLUE]
+        flat = np.full((1, palettes.TILE_PX, palettes.TILE_PX), DIM_GREY, dtype=np.uint16)
+
+        # Act
+        out = palettes.PaletteAssigner(a_palette_set(primaries), dither=True).assign(flat)
+
+        # Assert
+        assert np.unique(out.nibbles).tolist() == [1, 2, 3]
 
     def test_leaving_it_off_changes_nothing(self):
         # Arrange

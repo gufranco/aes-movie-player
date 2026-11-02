@@ -1143,19 +1143,26 @@ problem. It depends only on where a pixel sits inside its own tile, and
 because the matrix is 8x8 and a tile is 16x16 it also runs continuously
 across tile boundaries, so identical tiles still collapse to one entry.
 
-The threshold field and the two-entry mix live in the core,
-`fmvcore.dither`, so every player of the family dithers against its
-palettes the same way. `bayer_thresholds(TILE_PX)` tiles the 8x8 matrix
-over a 16x16 tile, so every tile sees the same field and identical
-tiles still quantise identically. `two_nearest` returns the closest
-entry, the runner-up and the share between them: how far along the
-segment between the two the colour projects, 0 on a palette entry, a
-half midway and 0 when the pair does not bracket the colour. `mix` swaps
-in the runner-up for that fraction of a tile's pixels. With dither on,
-the projection took blurred error from 0.00445 to 0.00427 on two seconds
-of the Sintel trailer and from 0.00970 to 0.00920 on Popeye, with 4 to
-5% fewer tiles, against the earlier radius share; both now sit below no
-dither, 0.00434 and 0.00930. The default stays off.
+The threshold field and the pattern dither live in the core,
+`fmvcore.dither`. `bayer_thresholds(TILE_PX)` tiles the 8x8 matrix over a
+16x16 tile, so every tile sees the same field and identical tiles still
+quantise identically. `pattern_candidates` takes four picks for a colour,
+each the nearest entry to the colour plus the error the earlier picks
+left, darkest first, and `pattern_pick` lets the threshold choose one by
+rank. The picks depend only on the colour and the bank, so
+`PaletteAssigner` builds them once per bank for all 32,768 colours, and a
+tile still quantises the same wherever it sits.
+
+Four picks can mix three or four entries of a bank, where the two-entry
+mix the Master System keeps can mix only a pair. On the six regression
+films at `q17` the two-entry mix tied with no dither, -1.9% to +0.5%;
+four picks beat no dither on all six, 0.2% to 6.0% lower blurred error,
+for about 1.2% more C-ROM tiles. One rung finer, `q16`, costs 4.2% more
+tiles for 5.0% lower error, so the picks buy about twice as much picture
+per tile as a rung does. Adding the error up in linear light measured
+0.2% worse, and sixteen picks gained more but baked six to ten times
+slower. A dithered bake takes two to three times as long. The default
+stays off, waiting on the owner's dither verdict.
 
 #### `oklab_grid`
 
@@ -1202,6 +1209,21 @@ ranks hundreds of thousands of tiles against 240 palettes.
 
 Cluster a sample of tiles and fit one palette per cluster.
 
+Each bank's fit runs weighted k-means from the heaviest colours, then
+migrates its weakest centroid: the one whose colours lose least if it goes
+moves to the farthest colour of the cluster with the most error, up to ten
+rounds, and a round is kept only when the total error falls. It is the
+utility migration of enhanced LBG, and it lowered blurred error on all six
+regression films, 1.3% to 5.4%, with C-ROM tiles equal or fewer and about
+a quarter more bake time. Re-fitting the banks around each tile's true
+quantisation error instead of its descriptor was measured and dropped:
+the films moved -0.2% to +0.7% for twice the bake time, so the descriptor
+fit already sits near the plateau at 240 banks. Sorting each bank's
+entries by lightness, so equal index patterns under different banks share
+a C-ROM tile, changed no tile count: a flat tile reduces to one of fifteen
+patterns whatever the order, and textured tiles never repeat exactly
+across banks.
+
 #### `PaletteAssigner`
 
 Picks the best palette for each tile and emits its pixel indices.
@@ -1215,9 +1237,9 @@ Choose a palette per tile and quantize its pixels.
 Pixel indices for a chunk of tiles, dithered when asked for.
 
 The dither is a strength from 0 to 1, as on the Master System player.
-It scales how far a pixel leans toward its runner-up entry, so 1 is the
-full ordered threshold and 0 is none. The default stays at 0 until the
-dither is judged by eye on the board.
+It scales how much of the earlier picks' error each pattern pick carries,
+so 1 is the full pattern and 0 is the nearest entry everywhere. The
+default stays at 0 until the dither is judged by eye on the board.
 
 
 ### [`neogeomedia/plan.py`](neogeomedia/plan.py)

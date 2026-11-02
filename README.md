@@ -432,7 +432,8 @@ Each of these was built and measured before being turned off. [`CHANGELOG.md`](C
 - **A calibration anchor on a frame-hold rung**: the hold rungs had been extrapolated, up to 26% optimistic; a fourth anchor measures them
 - **24 short calibration windows**: window count, not sample length, sets the accuracy. 3 windows read 0.62 of the true rate and 12 read 0.91; 24 land within a percent for 72 seconds of sampling
 - **Measured denoise per film**: a two-second window at 0, 1, 2 and 4, scored against the undenoised source on the blurred error. It picks 1 for the Popeye cartoon, 1.7% lower error with fewer tiles, and 0 for the other five films
-- **Ordered dithering, off by default**: an 8x8 threshold inside palette assignment, which keeps identical tiles interning as one, 54,250 tiles to 54,192 on a 30-second window. It loses on all six films, displayed error 5% to 33% higher, so it ships off and waits on the owner's verdict
+- **Ordered dithering, off by default**: an 8x8 threshold inside palette assignment, which keeps identical tiles interning as one. It now draws through four pattern picks a colour, which can mix three or four entries of a bank, and beats no dither on all six films by 0.2% to 6.0% of blurred error for about 1.2% more tiles, where the earlier two-entry mix tied. It ships off, at two to three times the bake time, and waits on the owner's verdict
+- **Palette entry migration**: each bank's weakest colour moves to the part of the bank with the most error, up to ten rounds, kept only when error falls. 1.3% to 5.4% lower blurred error on all six films, with equal or fewer tiles
 
 ### What a cartridge costs
 
