@@ -6,7 +6,7 @@ import json
 import pytest
 from fmvcore.testing import seeded
 
-from neogeomedia import quality, tiercache
+from neogeomedia import limits, quality, tiercache
 
 FILM_BYTES = 4096
 
@@ -25,7 +25,9 @@ def movie(tmp_path, fake):
 
 @pytest.fixture
 def params():
-    return tiercache.Params(start=0.0, duration=600.0, denoise=0.0, frame_hold=1)
+    return tiercache.Params(
+        start=0.0, duration=600.0, denoise=0.0, frame_hold=1, dither=limits.DEFAULT_DITHER
+    )
 
 
 @pytest.fixture
@@ -88,7 +90,7 @@ class TestTheKeyFollowsTheContent:
         # Assert
         assert after != before
 
-    @pytest.mark.parametrize("change", [{"frame_hold": 2}, {"start": 30.0}])
+    @pytest.mark.parametrize("change", [{"frame_hold": 2}, {"start": 30.0}, {"dither": 0.0}])
     def test_a_parameter_that_changes_cost_or_window_changes_the_key(self, movie, params, change):
         # Arrange
         before = tiercache.key_for(movie, params)

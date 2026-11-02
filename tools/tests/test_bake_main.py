@@ -121,7 +121,7 @@ class TestDitherStrength:
         # Assert
         assert last_report(capsys.readouterr().out)["dither"] == 0.5
 
-    def test_the_default_is_no_dither(self, synthetic_clip, tmp_path, capsys):
+    def test_the_default_is_full_dither(self, synthetic_clip, tmp_path, capsys):
         # Arrange
         argv = small_argv(synthetic_clip, tmp_path / "build")
 
@@ -129,7 +129,7 @@ class TestDitherStrength:
         bake.main(argv)
 
         # Assert
-        assert last_report(capsys.readouterr().out)["dither"] == 0.0
+        assert last_report(capsys.readouterr().out)["dither"] == 1.0
 
     def test_a_strength_past_the_maximum_is_refused(self, synthetic_clip, tmp_path):
         # Arrange

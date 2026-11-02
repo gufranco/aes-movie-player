@@ -43,7 +43,7 @@ class EncodeOptions:
     rate_control_gain: float = 4.0
     max_tolerance_scale: float = 4096.0
     stop_when_over_budget: bool = False
-    dither: float = palettes.NO_DITHER
+    dither: float = palettes.MAX_DITHER
 
 
 @dataclass(frozen=True, slots=True)

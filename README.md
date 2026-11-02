@@ -24,9 +24,9 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 
 <div align="center">
 
-<img src="readme/demo.gif" alt="Six seconds of the Sintel trailer playing from the built Neo Geo cartridge, captured from MAME" width="640">
+<img src="readme/demo.gif" alt="Six seconds of the Sintel trailer playing from the built Neo Geo cartridge, drawn from the cartridge's stream" width="640">
 
-<sub>Six seconds of the Sintel trailer, captured from MAME running the built cartridge at the console's own 320x224, with the position bar showing as the film starts. The same film opens the Master System and Game Gear player's README. Sintel is by the Blender Foundation, CC BY 3.0.</sub>
+<sub>Six seconds of the Sintel trailer from the built cartridge at the console's own 320x224, drawn from the cartridge's stream after a headless geolith capture matched that drawing pixel for pixel above the position bar. The same film opens the Master System and Game Gear player's README. Sintel is by the Blender Foundation, CC BY 3.0.</sub>
 
 </div>
 
@@ -137,7 +137,7 @@ feature a console cannot carry says "Not possible" with the hardware reason.
 | Black bars baked into a source are found and cropped | Yes | Yes | Yes |
 | Picture and sound step down from the best until the film fits | Yes. `--quality search` bakes down a 35-rung ladder, and sound takes the highest rate that still fits | Yes. A bake that overruns the cartridge steps the frame rate down through the same search, and sound goes last | Yes, the same search as the Master System |
 | The largest standard cartridge, no added hardware | Yes, 128 MiB of character ROM | Yes, 1 MB, the most any Sega mapper revision decodes | Yes, 1 MB, the same mapper |
-| Ordered dithering | Yes, `--dither`, off by default | Yes, `--dither`, on by default | Yes, `--dither`, on by default |
+| Ordered dithering | Yes, `--dither`, on by default | Yes, `--dither`, on by default | Yes, `--dither`, on by default |
 | Palettes refit as the film changes | Yes, per scene | Yes, per frame, kept while they still fit | Yes, per frame, from 4096 colours |
 | Sound with no added hardware | Yes, ADPCM-B on the YM2610 | Yes, tone synthesis on the PSG | Yes, tone synthesis on the PSG, routed left and right on the headphones from a stereo source |
 | A silent build that gives sound's room to the picture | Yes, `--silent`. Sound has its own ROM, so leaving it out frees no picture room | Yes, `--silent` | Yes, `--silent` |
@@ -300,7 +300,7 @@ That measures the source, settles the highest quality rung that fits a cartridge
 | `--preview out.mp4` | Also render what the cartridge will show, for checking by eye. A `.png` holds four frames beside their source instead |
 | `--silent` | Leave sound out. Sound has its own ROM, so the picture gains no room |
 | `--seek-every 10` | Seconds between the points C and D jump to. At least one frame |
-| `--dither 0.5` | An ordered dither strength from 0 to 1. Default: 0, no dither |
+| `--dither 0.5` | An ordered dither strength from 0 to 1. Default: 1, full strength; 0 bakes fastest, with no dither |
 | `--bundle DIR` | A folder to write a drop-in copy of the player library and this film into |
 | `--bake-only` | Stop before the ROM build |
 | `--build-dir DIR` | Put everything somewhere other than `build/` |
@@ -432,7 +432,7 @@ Each of these was built and measured before being turned off. [`CHANGELOG.md`](C
 - **A calibration anchor on a frame-hold rung**: the hold rungs had been extrapolated, up to 26% optimistic; a fourth anchor measures them
 - **24 short calibration windows**: window count, not sample length, sets the accuracy. 3 windows read 0.62 of the true rate and 12 read 0.91; 24 land within a percent for 72 seconds of sampling
 - **Measured denoise per film**: a two-second window at 0, 1, 2 and 4, scored against the undenoised source on the blurred error. It picks 1 for the Popeye cartoon, 1.7% lower error with fewer tiles, and 0 for the other five films
-- **Ordered dithering, off by default**: an 8x8 threshold inside palette assignment, which keeps identical tiles interning as one. It now draws through four pattern picks a colour, which can mix three or four entries of a bank, and beats no dither on all six films by 0.2% to 6.0% of blurred error for about 1.2% more tiles, where the earlier two-entry mix tied. It ships off, at two to three times the bake time, and waits on the owner's verdict
+- **Ordered dithering, on by default**: an 8x8 threshold inside palette assignment, which keeps identical tiles interning as one. It draws through sixteen pattern picks a colour, which can mix three or more entries of a bank, and beats no dither on all six films by 2.1% to 9.1% of blurred error, and four picks by 1.6% to 3.8%, for 1.4% to 7.8% more tiles, where the earlier two-entry mix tied. A bake takes six to nine times as long; `--dither 0` bakes fastest
 - **Palette entry migration**: each bank's weakest colour moves to the part of the bank with the most error, up to ten rounds, kept only when error falls. 1.3% to 5.4% lower blurred error on all six films, with equal or fewer tiles
 
 ### What a cartridge costs

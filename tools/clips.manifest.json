@@ -18,8 +18,8 @@
    "start": 0.0,
    "duration": 2.0,
    "quality": "q17",
-   "max_error": 0.00138,
-   "max_tiles_per_second": 2181
+   "max_error": 0.00196,
+   "max_tiles_per_second": 2328
   },
   {
    "key": "sintel-trailer",
@@ -40,8 +40,8 @@
    "start": 20.0,
    "duration": 2.0,
    "quality": "q17",
-   "max_error": 0.00099,
-   "max_tiles_per_second": 1567
+   "max_error": 0.00102,
+   "max_tiles_per_second": 1585
   },
   {
    "key": "popeye-for-president",
@@ -62,8 +62,8 @@
    "start": 60.0,
    "duration": 2.0,
    "quality": "q17",
-   "max_error": 0.00099,
-   "max_tiles_per_second": 868
+   "max_error": 0.00111,
+   "max_tiles_per_second": 895
   },
   {
    "key": "hong-kong-evening",
@@ -84,8 +84,8 @@
    "start": 2.0,
    "duration": 2.0,
    "quality": "q17",
-   "max_error": 0.00126,
-   "max_tiles_per_second": 5012
+   "max_error": 0.00150,
+   "max_tiles_per_second": 5105
   },
   {
    "key": "colourful-bird",
@@ -106,8 +106,8 @@
    "start": 4.0,
    "duration": 2.0,
    "quality": "q17",
-   "max_error": 0.00134,
-   "max_tiles_per_second": 7236
+   "max_error": 0.00143,
+   "max_tiles_per_second": 7471
   },
   {
    "key": "bhagoria-dance",
@@ -128,8 +128,8 @@
    "start": 4.0,
    "duration": 2.0,
    "quality": "q17",
-   "max_error": 0.00128,
-   "max_tiles_per_second": 6715
+   "max_error": 0.00176,
+   "max_tiles_per_second": 6821
   }
  ]
 }

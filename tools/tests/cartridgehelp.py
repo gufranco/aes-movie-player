@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from neogeomedia import tiercache
+from neogeomedia import limits, tiercache
 from tests.bakehelp import lavfi_clip
 
 FRAME = "size=160x120:rate=24"
@@ -69,7 +69,9 @@ def preview_pixels(path: Path) -> np.ndarray:
 
 
 def cache_key(source: Path, duration: float) -> str:
-    params = tiercache.Params(start=0.0, duration=duration, denoise=0.0, frame_hold=1)
+    params = tiercache.Params(
+        start=0.0, duration=duration, denoise=0.0, frame_hold=1, dither=limits.DEFAULT_DITHER
+    )
     return tiercache.key_for(source, params)
 
 

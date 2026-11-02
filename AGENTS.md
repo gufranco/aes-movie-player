@@ -89,9 +89,12 @@ are baked on every test run at rung q17 over a two-second window each. The
 manifest, [`tools/clips.manifest.json`](tools/clips.manifest.json), holds
 each film's identity, credit, licence, window and two ceilings: the displayed
 error and the tiles a second the bake may spend. The ceilings sit 15% above
-what the films measured on 2026-10-15, so a change has to make the picture
-or the dictionary measurably worse to fail, and ffmpeg differing slightly
-between this Mac and the runner does not. Only the synthetic film is
+what the films measured on 2026-11-02 with the dither on by default, so a
+change has to make the picture or the dictionary measurably worse to fail,
+and ffmpeg differing slightly between this Mac and the runner does not. The
+displayed error is per pixel, so the dither raised it 3% to 23% by
+construction while the blurred error fell; a ceiling guards against a
+regression and never judges a dither. Only the synthetic film is
 committed, in the core submodule as `fixtures/synthetic.mp4`; the rest are
 fetched and verified by SHA-256.
 

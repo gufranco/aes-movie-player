@@ -1146,23 +1146,28 @@ across tile boundaries, so identical tiles still collapse to one entry.
 The threshold field and the pattern dither live in the core,
 `fmvcore.dither`. `bayer_thresholds(TILE_PX)` tiles the 8x8 matrix over a
 16x16 tile, so every tile sees the same field and identical tiles still
-quantise identically. `pattern_candidates` takes four picks for a colour,
+quantise identically. `pattern_candidates` takes sixteen picks for a colour,
 each the nearest entry to the colour plus the error the earlier picks
 left, darkest first, and `pattern_pick` lets the threshold choose one by
 rank. The picks depend only on the colour and the bank, so
 `PaletteAssigner` builds them once per bank for all 32,768 colours, and a
 tile still quantises the same wherever it sits.
 
-Four picks can mix three or four entries of a bank, where the two-entry
-mix the Master System keeps can mix only a pair. On the six regression
-films at `q17` the two-entry mix tied with no dither, -1.9% to +0.5%;
-four picks beat no dither on all six, 0.2% to 6.0% lower blurred error,
-for about 1.2% more C-ROM tiles. One rung finer, `q16`, costs 4.2% more
-tiles for 5.0% lower error, so the picks buy about twice as much picture
-per tile as a rung does. Adding the error up in linear light measured
-0.2% worse, and sixteen picks gained more but baked six to ten times
-slower. A dithered bake takes two to three times as long. The default
-stays off, waiting on the owner's dither verdict.
+Sixteen picks can mix three or more entries of a bank, where the
+two-entry mix the Master System keeps can mix only a pair. On the six
+regression films at `q17` the two-entry mix tied with no dither, -1.9% to
++0.5%. Four picks beat no dither on all six, 0.2% to 6.0% lower blurred
+error, for about 1.2% more C-ROM tiles, and sixteen beat four on all six,
+1.6% to 3.8% lower, 2.1% to 9.1% below no dither for 1.4% to 7.8% more
+tiles. One rung finer, `q16`, costs 4.2% more tiles for 5.0% lower error;
+per tile spent, going from four picks to sixteen beat that rung on four
+films and sat near it on the other two. The sheets agree: no dither shows
+blocks on signs and gradients, and sixteen picks sit a little closer to
+the source than four. Adding the error up in linear light measured 0.2%
+worse. A bake at sixteen picks takes six to nine times as long as one
+without dither. The dither is on at full strength by default, because
+every default in the family is the best picture whatever the bake time;
+`--dither 0` is the fast bake.
 
 #### `oklab_grid`
 
@@ -1239,7 +1244,7 @@ Pixel indices for a chunk of tiles, dithered when asked for.
 The dither is a strength from 0 to 1, as on the Master System player.
 It scales how much of the earlier picks' error each pattern pick carries,
 so 1 is the full pattern and 0 is the nearest entry everywhere. The
-default stays at 0 until the dither is judged by eye on the board.
+default is 1, the measured best picture.
 
 
 ### [`neogeomedia/plan.py`](neogeomedia/plan.py)

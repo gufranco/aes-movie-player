@@ -9,7 +9,7 @@ from pathlib import Path
 from neogeomedia import quality
 
 SAMPLE_BYTES = 1 << 20
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 STORE_NAME = "neogeomedia-tiers.json"
 
 
@@ -19,6 +19,7 @@ class Params:
     duration: float
     denoise: float
     frame_hold: int
+    dither: float
 
 
 def default_store() -> Path:

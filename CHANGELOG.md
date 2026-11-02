@@ -493,8 +493,9 @@ it is written up with its limits under
 Gradient blocking was answered, though not the way the entry expected; what
 the ordered threshold turned out to be is written up under
 [What did not work](#what-did-not-work). The changes [AGENTS.md](AGENTS.md)
-lists ran on a board on 2026-10-17 with no defect seen. One thing remains: the
-owner's verdict on the dither default.
+lists ran on a board on 2026-10-17 with no defect seen. The dither default was
+settled on 2026-11-02: it is on, through sixteen pattern picks, because every
+default in the family is the best picture.
 
 ## Standing rules for this project
 

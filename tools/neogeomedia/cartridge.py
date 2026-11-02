@@ -217,7 +217,13 @@ def _measured_tier(args: argparse.Namespace) -> quality.Tier | None:
     info = ffmpeg.probe(args.source)
     span = _span(args, info)
     store = args.tier_cache or tiercache.default_store()
-    params = tiercache.Params(start=float(args.start), duration=span, denoise=0.0, frame_hold=1)
+    params = tiercache.Params(
+        start=float(args.start),
+        duration=span,
+        denoise=0.0,
+        frame_hold=1,
+        dither=float(args.dither),
+    )
     key = tiercache.key_for(args.source, params)
     tiercache.describe(store, key, source=args.source, params=params)
     known = tiercache.recall(store, key)

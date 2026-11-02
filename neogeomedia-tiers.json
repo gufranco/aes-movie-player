@@ -1,19 +1,4 @@
 {
-  "sources": {
-    "b72a5041d821567452f6fc2adc2491deb9b46b19294fa9007b3fbaf23daab92e": {
-      "digest": "7c40be5532f2b3392b4f1c3e11bacf984d8ef6b0b4549a0d9bc10efee9c1b8e4",
-      "file": "big_buck_bunny_720p_h264.mov",
-      "quality": "q01",
-      "tiers": {
-        "q01": 140640.0
-      },
-      "window": {
-        "denoise": 0.0,
-        "duration": 60.0,
-        "frame_hold": 1,
-        "start": 60.0
-      }
-    }
-  },
-  "version": 3
+  "sources": {},
+  "version": 4
 }
