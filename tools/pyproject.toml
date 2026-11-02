@@ -16,7 +16,7 @@ fmvcore = { path = "../fmv-core-python", editable = true }
 dev = [
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
-    "ruff==0.17.1",
+    "ruff==0.17.3",
     "mypy==2.4.0",
     "faker==40.43.0",
     "z80 @ git+https://github.com/gufranco/zilog-z80-python.git@e2fedbd600640f1f5079a15668cda0662037133c",
