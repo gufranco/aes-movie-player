@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define FMV_VERSION "3.3.0"
+#define FMV_VERSION "3.3.1"
 #define FMV_VERSION_MAJOR 3
 #define FMV_VERSION_MINOR 3
 

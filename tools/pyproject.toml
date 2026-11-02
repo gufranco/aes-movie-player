@@ -1,6 +1,6 @@
 [project]
 name = "neogeomedia"
-version = "3.3.0"
+version = "3.3.1"
 description = "Offline baker that turns a video file into a Neo Geo AES cartridge movie ROM"
 requires-python = ">=3.14"
 license = "MIT"
