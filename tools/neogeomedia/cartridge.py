@@ -164,7 +164,9 @@ def _settle_denoise(args: argparse.Namespace) -> None:
     window = min(denoise.WINDOW_SECONDS, span)
     start = args.start + max(0.0, (span - window) / 2.0)
     tier = quality.tier_by_name(args.quality)
-    scores = denoise.measure(args.source, tier, start=start, window=window)
+    scores = denoise.measure(
+        args.source, tier, start=start, window=window, dither=float(args.dither)
+    )
     chosen = denoise.choose(scores)
     measured = ", ".join(f"{score.strength:g}: {score.error:.5f}" for score in scores)
     print(f"denoise {chosen.strength:g}, blurred error by strength {measured}", file=sys.stderr)

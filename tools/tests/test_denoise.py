@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from neogeomedia import denoise, quality
+from neogeomedia import denoise, encode, frames, quality
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "fmv-core-python" / "fixtures" / "synthetic.mp4"
@@ -64,7 +64,9 @@ class TestMeasure:
         tier = quality.tier_by_name("q17")
 
         # Act
-        scores = denoise.measure(FIXTURE, tier, start=0.0, window=1.0, candidates=(0.0, 4.0))
+        scores = denoise.measure(
+            FIXTURE, tier, start=0.0, window=1.0, candidates=(0.0, 4.0), dither=0.0
+        )
 
         # Assert
         assert ([s.strength for s in scores], all(s.error > 0 for s in scores)) == (
@@ -78,7 +80,31 @@ class TestMeasure:
         tier = quality.tier_by_name("q17")
 
         # Act
-        none, heavy = denoise.measure(FIXTURE, tier, start=0.0, window=1.0, candidates=(0.0, 8.0))
+        none, heavy = denoise.measure(
+            FIXTURE, tier, start=0.0, window=1.0, candidates=(0.0, 8.0), dither=0.0
+        )
 
         # Assert
         assert heavy.tiles <= none.tiles
+
+    @pytest.mark.ffmpeg
+    def test_each_trial_bakes_with_the_dither_the_film_will_be_baked_with(self):
+        # Arrange
+        tier = quality.tier_by_name("q17")
+        clip = frames.decode(FIXTURE, start=0.0, duration=1.0)
+        plain = encode.EncodeOptions(
+            tolerance=tier.tolerance,
+            candidates=tier.candidates,
+            chroma_weight=tier.chroma_weight,
+            frame_hold=tier.frame_hold,
+            dither=0.0,
+        )
+        expected = encode.encode(clip, plain).stats.tile_count
+
+        # Act
+        (score,) = denoise.measure(
+            FIXTURE, tier, start=0.0, window=1.0, candidates=(0.0,), dither=0.0
+        )
+
+        # Assert
+        assert score.tiles == expected
