@@ -1,3 +1,10 @@
+# [3.2.0](https://github.com/gufranco/neogeo-media-player/compare/v3.1.0...v3.2.0) (2026-11-02)
+
+
+### Features
+
+* **palettes:** migrate entries, pattern dither ([8e7fef3](https://github.com/gufranco/neogeo-media-player/commit/8e7fef356a70e14193c2c93f07bdba5d97aec61f))
+
 # [3.1.0](https://github.com/gufranco/neogeo-media-player/compare/v3.0.0...v3.1.0) (2026-10-30)
 
 
