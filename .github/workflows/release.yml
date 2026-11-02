@@ -43,7 +43,7 @@ jobs:
             echo "current=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v6.9.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v6.9.0
         if: steps.fresh.outputs.current == 'true'
         with:
           version: "0.12.23"
@@ -51,7 +51,7 @@ jobs:
       - name: Run semantic-release
         id: semrel
         if: steps.fresh.outputs.current == 'true'
-        uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90  # v6.0.0
+        uses: cycjimmy/semantic-release-action@d9bf53a078bd2f86aaffaec796dbb3d28f1b6f34  # v8.1.3
         with:
           semantic_version: 25.0.9
           extra_plugins: |
