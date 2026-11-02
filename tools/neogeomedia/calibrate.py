@@ -7,7 +7,7 @@ import numpy as np
 import numpy.typing as npt
 from fmvcore import ffmpeg
 
-from neogeomedia import encode, frames, neocolor, quality
+from neogeomedia import encode, frames, neocolor, palettes, quality
 
 DEFAULT_SAMPLE_COUNT: int = 24
 DEFAULT_SAMPLE_SECONDS: float = 3.0
@@ -80,6 +80,7 @@ def measure_reference_rate(
     seed: int = 0,
     start: float = 0.0,
     duration: float | None = None,
+    dither: float = palettes.MAX_DITHER,
 ) -> float:
     source = Path(source)
     clip = _source_clip(
@@ -91,7 +92,7 @@ def measure_reference_rate(
         duration=duration,
     )
     tier = quality.tier_by_name(quality.REFERENCE_TIER)
-    rate: float = _encode_rate(clip, tier, seed=seed) / _minutes(clip)
+    rate: float = _encode_rate(clip, tier, seed=seed, dither=dither) / _minutes(clip)
     return rate
 
 
@@ -116,7 +117,13 @@ def measure_anchors(
     return reference_rate, {rung: rate / reference_rate for rung, rate in measured.items()}
 
 
-def _encode_rate(clip: npt.NDArray[np.uint8], tier: quality.Tier, *, seed: int) -> float:
+def _encode_rate(
+    clip: npt.NDArray[np.uint8],
+    tier: quality.Tier,
+    *,
+    seed: int,
+    dither: float = palettes.MAX_DITHER,
+) -> float:
     sample = encode.to_tiles(neocolor.rgb_to_color_index(clip[::SAMPLE_EVERY]))
     result = encode.encode_stream(
         [clip],
@@ -126,6 +133,7 @@ def _encode_rate(clip: npt.NDArray[np.uint8], tier: quality.Tier, *, seed: int) 
             frame_hold=tier.frame_hold,
             tolerance=tier.tolerance,
             seed=seed,
+            dither=dither,
         ),
         sample_tiles=sample.reshape(-1, encode.TILE_PX, encode.TILE_PX),
         total_frames=clip.shape[0],

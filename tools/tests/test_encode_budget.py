@@ -81,6 +81,17 @@ class TestDictionaryCeiling:
         # Assert
         assert result.updates_per_frame[2] < SLOT_COUNT
 
+    def test_a_bake_told_to_stop_ends_when_the_dictionary_fills(self):
+        # Arrange
+        clip = noise_clip(6)
+        settings = options(palette_count=8, dictionary_capacity=CEILING, stop_when_over_budget=True)
+
+        # Act
+        result = encode.encode(clip, settings)
+
+        # Assert
+        assert (result.stats.truncated, result.stats.dictionary_full) == (True, True)
+
     def test_an_unfilled_dictionary_reports_room_left(self):
         # Arrange
         clip = flat_clip(3, filler_colour())

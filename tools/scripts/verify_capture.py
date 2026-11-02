@@ -6,7 +6,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import NamedTuple
+from typing import IO, NamedTuple, cast
 
 import numpy as np
 
@@ -46,17 +46,15 @@ def stream_preview(path: Path) -> Iterator[np.ndarray]:
         ["ffmpeg", "-v", "error", "-i", str(path), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
         stdout=subprocess.PIPE,
     )
-    if process.stdout is None:
-        msg = "ffmpeg produced no output pipe"
-        raise RuntimeError(msg)
+    output = cast("IO[bytes]", process.stdout)
     try:
         while True:
-            payload = process.stdout.read(stride)
+            payload = output.read(stride)
             if len(payload) < stride:
                 return
             yield np.frombuffer(payload, np.uint8).reshape(RASTER_HEIGHT, RASTER_WIDTH, 3)
     finally:
-        process.stdout.close()
+        output.close()
         process.wait()
 
 

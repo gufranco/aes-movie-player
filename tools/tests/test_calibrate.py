@@ -91,14 +91,14 @@ class TestMeasureReferenceRate:
         source = synthetic_clip
 
         # Act
-        rate = calibrate.measure_reference_rate(source, count=2, seconds=1.0)
+        rate = calibrate.measure_reference_rate(source, count=2, seconds=1.0, dither=0.0)
 
         # Assert
         assert rate > 0.0
 
     def test_the_rate_feeds_tier_selection(self, synthetic_clip):
         # Arrange
-        rate = calibrate.measure_reference_rate(synthetic_clip, count=2, seconds=1.0)
+        rate = calibrate.measure_reference_rate(synthetic_clip, count=2, seconds=1.0, dither=0.0)
         tier = quality.tier_by_name("standard")
 
         # Act
@@ -112,12 +112,12 @@ class TestSampledRange:
     def test_it_measures_only_the_stretch_that_will_be_baked(self, half_black_clip):
         # Arrange
         black = calibrate.measure_reference_rate(
-            half_black_clip, count=2, seconds=1.0, start=0.0, duration=8.0
+            half_black_clip, count=2, seconds=1.0, dither=0.0, start=0.0, duration=8.0
         )
 
         # Act
         busy = calibrate.measure_reference_rate(
-            half_black_clip, count=2, seconds=1.0, start=8.0, duration=4.0
+            half_black_clip, count=2, seconds=1.0, dither=0.0, start=8.0, duration=4.0
         )
 
         # Assert
@@ -129,7 +129,7 @@ class TestSampledRange:
 
         # Act
         rate = calibrate.measure_reference_rate(
-            source, count=2, seconds=1.0, start=0.0, duration=9999.0
+            source, count=2, seconds=1.0, dither=0.0, start=0.0, duration=9999.0
         )
 
         # Assert

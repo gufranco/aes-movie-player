@@ -24,7 +24,7 @@ GATES = Gates(
                 "--cov=neogeomedia",
                 "--cov=tools/scripts",
                 "--cov-config=tools/pyproject.toml",
-                "--cov-fail-under=95",
+                "--cov-fail-under=100",
             ),
         ),
     ),

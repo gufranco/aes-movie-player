@@ -266,8 +266,6 @@ def _reach(args: argparse.Namespace, tier: quality.Tier) -> tuple[float, Path]:
     report = scratch / f"{tier.name}.json"
     report.unlink(missing_ok=True)
     _probe_bake(args, scratch, tier)
-    if not report.is_file():
-        return 0.0, report
     frames_held = float(json.loads(report.read_text())["frames"])
     return frames_held / float(frames.VBLANK_FPS), report
 
@@ -286,9 +284,8 @@ def _refuse_search(args: argparse.Namespace) -> int:
     info = ffmpeg.probe(args.source)
     tier = _cheapest(probe.candidates(float(info.fps), float(frames.VBLANK_FPS)))
     seconds, measured = _reach(args, tier)
-    if measured.is_file():
-        _report_path(args).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(measured, _report_path(args))
+    _report_path(args).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(measured, _report_path(args))
     advice = shortfall.shortfall(seconds=seconds, rung=tier.name, cheapest=True)
     print(f"this source fits no tier; {advice}", file=sys.stderr)
     return NO_TIER_FITS

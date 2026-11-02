@@ -417,7 +417,3 @@ def rescale(relative_cost: float, *, anchors: dict[float, float]) -> float:
         return low[1]
     ratio = (math.log(relative_cost) - math.log(low[0])) / span
     return math.exp(math.log(low[1]) + ratio * (math.log(high[1]) - math.log(low[1])))
-
-
-def nearest_by_chroma(chroma_weight: float) -> Tier:
-    return min(LADDER, key=lambda tier: abs(tier.chroma_weight - chroma_weight))

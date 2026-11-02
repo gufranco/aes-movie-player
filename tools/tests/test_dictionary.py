@@ -228,3 +228,26 @@ class TestBatch:
 
         # Assert
         assert tiles.shape == (0, 16, 16)
+
+    def test_an_empty_batch_interns_nothing(self):
+        # Arrange
+        dictionary = TileDictionary()
+
+        # Act
+        refs = dictionary.intern_batch(np.zeros((0, 16, 16), dtype=np.uint8))
+
+        # Assert
+        assert (refs, len(dictionary)) == ([], 0)
+
+
+class TestRomImages:
+    def test_padding_below_the_payload_is_refused(self):
+        # Arrange
+        dictionary = holding(asymmetric_tile(30), asymmetric_tile(31))
+
+        # Act
+        with pytest.raises(ValueError) as refused:
+            dictionary.rom_images(pad_to=1)
+
+        # Assert
+        assert str(refused.value) == "pad_to 1 is smaller than the 128 byte payload"

@@ -10,6 +10,7 @@ from fmvcore import colour
 
 from neogeomedia import crom, neocolor, palettes, redraw, stream
 from neogeomedia.dictionary import TileDictionary
+from neogeomedia.encodeoptions import EncodeOptions
 from neogeomedia.ratecontrol import RateController
 from neogeomedia.screen import Screen
 
@@ -20,30 +21,6 @@ TILE_PX: Final = 16
 BLURRED_EVERY: Final = 8
 FRAME_WIDTH: Final = GRID_COLS * TILE_PX
 FRAME_HEIGHT: Final = GRID_ROWS * TILE_PX
-
-
-@dataclass(frozen=True, slots=True)
-class EncodeOptions:
-    palette_count: int = 240
-    base_bank: int = 16
-    keyframe_interval: int = 90
-    tolerance: float = 0.0005
-    scene_cut_ratio: float = 0.90
-    candidates: int = 12
-    sample_stride: int = 8
-    seed: int = 0
-    collect_rendered: bool = True
-    allow_flip: bool = False
-    dictionary_capacity: int = 1 << 20
-    frame_hold: int = 1
-    motion_masking: float = 0.0
-    chroma_weight: float = palettes.DEFAULT_CHROMA_WEIGHT
-    scene_cut_floor: float = 0.01
-    tile_budget: int = 0
-    rate_control_gain: float = 4.0
-    max_tolerance_scale: float = 4096.0
-    stop_when_over_budget: bool = False
-    dither: float = palettes.MAX_DITHER
 
 
 @dataclass(frozen=True, slots=True)

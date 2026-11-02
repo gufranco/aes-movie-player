@@ -365,11 +365,10 @@ real bakes rather than paging patterns, and its sound is ADPCM-B samples in
 their own V-ROM. It decodes, scores, verifies films and measures captures
 through `fmv-core-python`.
 
-Gaps against "What every player does" (as of 2026-10-17):
+Gaps against "What every player does" (as of 2026-11-02):
 
-- Coverage per file and the share of end-to-end tests have not yet been
-  measured against the 2026-10-17 requirement of 100% in every file and
-  end-to-end tests; CI enforces 95%.
+- Every file is at 100% of statements and branches, with no exclusion, and
+  CI enforces 100%. The share of end-to-end tests has not been measured.
 
 Differences the hardware forces:
 

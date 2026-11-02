@@ -226,3 +226,35 @@ class TestStreaming:
 
         # Assert
         assert np.array_equal(sample, short_decode[::3])
+
+    def test_streaming_one_frame_a_chunk_yields_every_frame_alone(self, widescreen_clip):
+        # Arrange
+        chunk_frames = 1
+
+        # Act
+        chunks = list(
+            frames.stream(widescreen_clip, start=0.0, duration=0.3, chunk_frames=chunk_frames)
+        )
+
+        # Assert
+        assert [len(chunk) for chunk in chunks] == [1] * 17
+
+    def test_a_stride_longer_than_a_chunk_skips_whole_chunks(self, widescreen_clip):
+        # Arrange
+        stride = 100
+
+        # Act
+        sample = frames.sample(widescreen_clip, start=0.0, duration=1.2, stride=stride)
+
+        # Assert
+        assert sample.shape == (1, *RASTER)
+
+    def test_sampling_no_time_returns_no_frames(self, widescreen_clip):
+        # Arrange
+        duration = 0.0
+
+        # Act
+        sample = frames.sample(widescreen_clip, start=0.0, duration=duration, stride=2)
+
+        # Assert
+        assert sample.shape == (0, *RASTER)

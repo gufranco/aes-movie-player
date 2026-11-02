@@ -9,7 +9,7 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 
 [![ci](https://img.shields.io/github/actions/workflow/status/gufranco/neogeo-media-player/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/gufranco/neogeo-media-player/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/gufranco/neogeo-media-player?style=flat-square&label=release)](https://github.com/gufranco/neogeo-media-player/releases/latest)
-[![coverage](https://img.shields.io/badge/coverage-95%25-brightgreen?style=flat-square)](https://github.com/gufranco/neogeo-media-player/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=flat-square)](https://github.com/gufranco/neogeo-media-player/actions/workflows/ci.yml)
 [![license](https://img.shields.io/github/license/gufranco/neogeo-media-player?style=flat-square&label=license)](LICENSE)
 
 </div>
@@ -555,7 +555,7 @@ their identity and the script above fetches and verifies them. Without them
 only the committed synthetic clip runs, and the gate is much weaker. Every
 credit and licence is in [`tools/clips.manifest.json`](tools/clips.manifest.json).
 
-Coverage is gated at 95% in [CI](.github/workflows/ci.yml), which also builds a cartridge end to end and builds the example twice, once video-only and once with the movie's own sound driver.
+Coverage is gated at 100% of every file in [CI](.github/workflows/ci.yml), which also builds a cartridge end to end and builds the example twice, once video-only and once with the movie's own sound driver.
 
 ### Documentation
 

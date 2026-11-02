@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
 import numpy.typing as npt
 
 from neogeomedia import palettes
+from neogeomedia.encodeoptions import EncodeOptions
 from neogeomedia.screen import GRID_COLS, GRID_ROWS, Screen
-
-if TYPE_CHECKING:
-    from neogeomedia.encode import EncodeOptions
 
 
 def movement(

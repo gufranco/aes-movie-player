@@ -120,6 +120,16 @@ class TestEpochCadence:
 
 
 class TestMovementFloor:
+    def test_a_single_frame_asks_for_the_minimum_floor(self, still_clip):
+        # Arrange
+        one_field = 0.02
+
+        # Act
+        floor = content.movement_floor(still_clip, duration=one_field)
+
+        # Assert
+        assert floor == content.MOVEMENT_FLOOR_MINIMUM
+
     def test_a_still_source_asks_for_a_low_floor(self, still_clip):
         # Arrange
         path = still_clip

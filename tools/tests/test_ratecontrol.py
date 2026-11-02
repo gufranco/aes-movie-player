@@ -53,6 +53,16 @@ class TestRateController:
         # Assert
         assert tolerance == BASE
 
+    def test_spending_just_under_what_is_affordable_leaves_the_threshold_alone(self):
+        # Arrange
+        pacer = controller(tile_budget=610)
+
+        # Act
+        tolerance = pacer.tolerance(100, 0, 100)
+
+        # Assert
+        assert tolerance == BASE
+
     def test_past_the_last_frame_the_current_scale_holds(self):
         # Arrange
         pacer = controller(tile_budget=1_000, max_tolerance_scale=64.0)

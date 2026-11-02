@@ -1573,11 +1573,6 @@ measured there. Rungs between two anchors are interpolated in log space,
 which keeps the ordering: a rung cheaper on the ladder stays cheaper
 after correction.
 
-#### `nearest_by_chroma`
-
-The rung whose colour weight is closest to a wanted one.
-
-
 ### [`neogeomedia/ratecontrol.py`](neogeomedia/ratecontrol.py)
 
 Pace tile spending against the cartridge's budget.

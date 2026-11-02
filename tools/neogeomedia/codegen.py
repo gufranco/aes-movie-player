@@ -265,8 +265,6 @@ def _layout_fields() -> dict[str, object]:
 
 
 def _subtitle_count(artifacts: dict[str, Path]) -> int:
-    if "subtitles" not in artifacts:
-        return 0
     return artifacts["subtitles"].stat().st_size // subtitles.RECORD_BYTES
 
 

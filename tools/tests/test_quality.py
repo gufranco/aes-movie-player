@@ -362,3 +362,45 @@ class TestAnchorChoice:
 
         # Assert
         assert all(quality.tier_by_name(tier.name) is tier for tier in anchors)
+
+
+class TestEdges:
+    def test_a_rung_that_costs_nothing_fits_any_length(self):
+        # Arrange
+        tier = quality.tier_by_name(quality.REFERENCE_TIER)
+
+        # Act
+        minutes = quality.max_minutes(tier, 0.0)
+
+        # Assert
+        assert minutes == float("inf")
+
+    def test_a_film_of_no_length_takes_the_default_audio_rate(self):
+        # Arrange
+        minutes = 0.0
+
+        # Act
+        rate = quality.audio_hz_for(minutes)
+
+        # Assert
+        assert rate == quality.DEFAULT_AUDIO_HZ
+
+    def test_a_rung_with_no_capacity_overshoots_without_bound(self):
+        # Arrange
+        fit = quality.Fit(tier=quality.LADDER[0], minutes=1.0, capacity_minutes=0.0)
+
+        # Act
+        overshoot = fit.overshoot
+
+        # Assert
+        assert overshoot == float("inf")
+
+    def test_two_anchors_at_the_same_cost_give_the_lower_ones_rate(self):
+        # Arrange
+        anchors = {1.0: 500.0, 1.0 + 1e-14: 900.0}
+
+        # Act
+        rate = quality.rescale(1.0, anchors=anchors)
+
+        # Assert
+        assert rate == 500.0

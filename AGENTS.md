@@ -52,7 +52,7 @@ read out of both emulators' decoders.
 | Claim | Command |
 |:--|:--|
 | The baker holds | `uv --project tools run ruff format --check tools/`, `ruff check tools/`, `mypy tools/neogeomedia tools/scripts` |
-| The behaviour holds | `NEOGEOMEDIA_CC_REQUIRED=1 NEOGEOMEDIA_FFMPEG_REQUIRED=1 uv --project tools run python -m pytest tools/tests --cov=neogeomedia --cov=tools/scripts --cov-config=tools/pyproject.toml --cov-fail-under=95` |
+| The behaviour holds | `NEOGEOMEDIA_CC_REQUIRED=1 NEOGEOMEDIA_FFMPEG_REQUIRED=1 uv --project tools run python -m pytest tools/tests --cov=neogeomedia --cov=tools/scripts --cov-config=tools/pyproject.toml --cov-fail-under=100` |
 | A commit is clean | `.githooks/pre-commit`, installed once by `make hooks` |
 | The regression set holds | `uv --project tools run python tools/scripts/fetch_clips.py`, then the behaviour gate with `NEOGEOMEDIA_CLIPS_REQUIRED=1` |
 | It builds | `make rom` |
@@ -74,7 +74,7 @@ before claiming a change is done.
    message, this file, the development log, [`tools/DESIGN.md`](tools/DESIGN.md)
    for the baker, or [`docs/hardware.md`](docs/hardware.md) for the player.
 3. **Functions under 30 lines, files under 500**, `mypy` strict, `ruff` clean,
-   coverage 95%.
+   coverage 100% of every file, with no exclusion.
 4. **The tier file is a property of films, not of a run.**
    [`neogeomedia-tiers.json`](neogeomedia-tiers.json) is committed; a bake made
    to test something, such as a demo capture, never lands in it.

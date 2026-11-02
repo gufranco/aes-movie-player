@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from neogeomedia import limits, tiercache
+from neogeomedia import tiercache
 from tests.bakehelp import lavfi_clip
 
 FRAME = "size=160x120:rate=24"
@@ -21,6 +21,11 @@ DOCKER_LOG = "docker.log"
 MEDIA_TOOLS = ("ffmpeg", "ffprobe")
 SYSTEM_PATH = ("/usr/bin", "/bin")
 HOST_COMPILER = "m68k-neogeo-elf-gcc"
+PLAIN_DITHER = 0.0
+
+
+def plain(source: Path) -> list[str]:
+    return [str(source), "--dither", str(PLAIN_DITHER)]
 
 
 def short_clip(path: Path) -> Path:
@@ -70,7 +75,7 @@ def preview_pixels(path: Path) -> np.ndarray:
 
 def cache_key(source: Path, duration: float) -> str:
     params = tiercache.Params(
-        start=0.0, duration=duration, denoise=0.0, frame_hold=1, dither=limits.DEFAULT_DITHER
+        start=0.0, duration=duration, denoise=0.0, frame_hold=1, dither=PLAIN_DITHER
     )
     return tiercache.key_for(source, params)
 

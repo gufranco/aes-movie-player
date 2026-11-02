@@ -9,7 +9,7 @@
 
 [![ci](https://img.shields.io/github/actions/workflow/status/gufranco/neogeo-media-player/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/gufranco/neogeo-media-player/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/gufranco/neogeo-media-player?style=flat-square&label=release)](https://github.com/gufranco/neogeo-media-player/releases/latest)
-[![coverage](https://img.shields.io/badge/coverage-95%25-brightgreen?style=flat-square)](https://github.com/gufranco/neogeo-media-player/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=flat-square)](https://github.com/gufranco/neogeo-media-player/actions/workflows/ci.yml)
 [![license](https://img.shields.io/github/license/gufranco/neogeo-media-player?style=flat-square&label=license)](LICENSE)
 
 </div>
@@ -546,7 +546,7 @@ uv --project tools run python tools/scripts/fetch_clips.py
 
 回帰セットは、意図的に種類を変えた6本のクリップをベイクします。これらはリポジトリに含まれておらず、再配布できるものでもないため、マニフェストにはその識別情報を記録し、上のスクリプトで取得と検証を行います。それらがない場合はコミット済みの合成クリップだけが実行され、ゲートは大幅に弱くなります。クレジットとライセンスはすべて[`tools/clips.manifest.json`](tools/clips.manifest.json)にあります。
 
-カバレッジは[CI](.github/workflows/ci.yml)で95%をゲートとしています。CIはカートリッジをエンドツーエンドでビルドし、カットシーンの例を、映像のみと、映像自身のサウンドドライバー付きの2通りでビルドします。
+カバレッジは[CI](.github/workflows/ci.yml)で全ファイル100%をゲートとしています。CIはカートリッジをエンドツーエンドでビルドし、カットシーンの例を、映像のみと、映像自身のサウンドドライバー付きの2通りでビルドします。
 
 ### ドキュメント
 

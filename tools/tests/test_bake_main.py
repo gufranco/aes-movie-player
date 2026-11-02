@@ -7,7 +7,7 @@ import pytest
 
 from neogeomedia import bake, bundle, soundtrack
 from tests.bakehelp import SYNTHETIC_FILM, small_argv, tone_clip
-from tests.cartridgehelp import last_report
+from tests.cartridgehelp import header, last_report
 
 pytestmark = pytest.mark.ffmpeg
 
@@ -70,6 +70,16 @@ class TestSilent:
         assert code == 0
         assert last_report(capsys.readouterr().out)["has_audio"] is False
         assert not (build / "baked" / soundtrack.VOICE_FILE).exists()
+
+    def test_an_explicit_audio_rate_reaches_the_header(self, tone, tmp_path):
+        # Arrange
+        build = tmp_path / "build"
+
+        # Act
+        code = bake.main(small_argv(tone, build, "--audio-rate", "22050"))
+
+        # Assert
+        assert (code, "#define MOVIE_AUDIO_HZ 22050\n" in header(build)) == (0, True)
 
     def test_a_film_asked_to_be_silent_is_not_announced_as_soundless(self, tmp_path, capsys):
         # Arrange

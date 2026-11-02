@@ -10,7 +10,7 @@ import numpy as np
 import numpy.typing as npt
 from fmvcore import ffmpeg
 
-from neogeomedia import calibrate, encode, frames, neocolor, quality
+from neogeomedia import calibrate, encode, frames, neocolor, palettes, quality
 
 SECONDS_PER_MINUTE: Final = 60.0
 
@@ -45,6 +45,7 @@ def measure_point(
     tolerance: float,
     frame_hold: int,
     seed: int,
+    dither: float = palettes.MAX_DITHER,
 ) -> Point:
     sample_tiles = encode.to_tiles(neocolor.rgb_to_color_index(clip[::4])).reshape(-1, 16, 16)
     result = encode.encode_stream(
@@ -55,6 +56,7 @@ def measure_point(
             frame_hold=frame_hold,
             tolerance=tolerance,
             seed=seed,
+            dither=dither,
         ),
         sample_tiles=sample_tiles,
         total_frames=clip.shape[0],
@@ -127,12 +129,20 @@ def sweep(
     count: int = calibrate.DEFAULT_SAMPLE_COUNT,
     seconds: float = calibrate.DEFAULT_SAMPLE_SECONDS,
     seed: int = 0,
+    dither: float = palettes.MAX_DITHER,
 ) -> list[Point]:
     info = ffmpeg.probe(source)
     windows = calibrate.sample_windows(info.duration, count=count, seconds=seconds)
     clip = calibrate.windowed_clip(source, windows)
     colour_points = [
-        measure_point(clip, chroma_weight=chroma, tolerance=tolerance, frame_hold=1, seed=seed)
+        measure_point(
+            clip,
+            chroma_weight=chroma,
+            tolerance=tolerance,
+            frame_hold=1,
+            seed=seed,
+            dither=dither,
+        )
         for chroma, tolerance in zip(CHROMA_SWEEP, _paired_tolerances(), strict=True)
     ]
     hold_points = [
@@ -142,6 +152,7 @@ def sweep(
             tolerance=TOLERANCE_SWEEP[-1],
             frame_hold=hold,
             seed=seed,
+            dither=dither,
         )
         for hold in HOLD_SWEEP[1:]
     ]

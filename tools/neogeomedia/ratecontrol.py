@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import Final
 
-if TYPE_CHECKING:
-    from neogeomedia.encode import EncodeOptions
+from neogeomedia.encodeoptions import EncodeOptions
 
 
 class RateController:

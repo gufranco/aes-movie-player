@@ -9,7 +9,7 @@
 
 [![ci](https://img.shields.io/github/actions/workflow/status/gufranco/neogeo-media-player/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/gufranco/neogeo-media-player/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/gufranco/neogeo-media-player?style=flat-square&label=release)](https://github.com/gufranco/neogeo-media-player/releases/latest)
-[![coverage](https://img.shields.io/badge/coverage-95%25-brightgreen?style=flat-square)](https://github.com/gufranco/neogeo-media-player/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=flat-square)](https://github.com/gufranco/neogeo-media-player/actions/workflows/ci.yml)
 [![license](https://img.shields.io/github/license/gufranco/neogeo-media-player?style=flat-square&label=license)](LICENSE)
 
 </div>
@@ -546,7 +546,7 @@ uv --project tools run python tools/scripts/fetch_clips.py
 
 回歸測試集刻意烘焙六段不同類型的片段。它們不在儲存庫內，我們亦無權再分發，所以清單只記錄其身分，由上述腳本下載並驗證。沒有它們時，只有已提交的合成片段會運行，閘門亦弱得多。所有鳴謝及授權均列於 [`tools/clips.manifest.json`](tools/clips.manifest.json)。
 
-覆蓋率在 [CI](.github/workflows/ci.yml) 中以 95% 為門檻，CI 也會端對端建置一個卡帶，並建置過場動畫範例兩次，一次只有影片，一次附帶影片自己的音效驅動程式。
+覆蓋率在 [CI](.github/workflows/ci.yml) 中以每個檔案 100% 為門檻，CI 也會端對端建置一個卡帶，並建置過場動畫範例兩次，一次只有影片，一次附帶影片自己的音效驅動程式。
 
 ### 文件
 

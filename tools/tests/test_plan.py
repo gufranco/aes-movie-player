@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import contextlib
+import io
+
 import pytest
 
 from neogeomedia import plan, quality
@@ -18,27 +21,34 @@ def plan_argv(clip) -> list[str]:
     return ["--source", str(clip), "--samples", "2", "--sample-seconds", "1"]
 
 
+@pytest.fixture(scope="module")
+def planned(synthetic_clip) -> tuple[int, str]:
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        code = plan.main(plan_argv(synthetic_clip))
+    return code, printed.getvalue()
+
+
 class TestPlanCommand:
-    def test_it_succeeds_on_a_real_source(self, synthetic_clip):
+    def test_it_succeeds_on_a_real_source(self, planned):
         # Arrange
-        argv = plan_argv(synthetic_clip)
+        run = planned
 
         # Act
-        code = plan.main(argv)
+        code, _ = run
 
         # Assert
         assert code == 0
 
-    def test_it_prints_the_ladder(self, synthetic_clip, capsys):
+    def test_it_prints_the_ladder(self, planned):
         # Arrange
-        argv = plan_argv(synthetic_clip)
+        run = planned
 
         # Act
-        code = plan.main(argv)
+        code, out = run
 
         # Assert
         assert code == 0
-        out = capsys.readouterr().out
         assert "Quality ladder" in out
         assert quality.LADDER[0].name in out
         assert quality.LADDER[-1].name in out
@@ -48,13 +58,13 @@ class TestPlanCommand:
         ["tiles per minute", "C-ROM", "source.mp4"],
         ids=["measured-rate", "cartridge-budget", "source-name"],
     )
-    def test_it_prints_what_was_measured(self, synthetic_clip, capsys, expected):
+    def test_it_prints_what_was_measured(self, planned, expected):
         # Arrange
-        argv = plan_argv(synthetic_clip)
+        run = planned
 
         # Act
-        code = plan.main(argv)
+        code, out = run
 
         # Assert
         assert code == 0
-        assert expected in capsys.readouterr().out
+        assert expected in out

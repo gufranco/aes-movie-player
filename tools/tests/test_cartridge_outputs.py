@@ -7,7 +7,7 @@ import pytest
 
 from neogeomedia import bake, cartridge, quality
 from tests.bakehelp import tone_clip
-from tests.cartridgehelp import header, last_report, remember_rates, short_clip
+from tests.cartridgehelp import header, last_report, plain, remember_rates, short_clip
 
 PAST_THE_END = "1.0"
 STILL_ROWS = 4
@@ -26,7 +26,7 @@ def tone(tmp_path_factory):
 
 
 def named(source, build, *extra):
-    return [str(source), "--quality", "q17", "--build-dir", str(build), *extra]
+    return [*plain(source), "--quality", "q17", "--build-dir", str(build), *extra]
 
 
 def png_size(path):
@@ -77,7 +77,7 @@ class TestTheReport:
         # Arrange
         store = tmp_path / "tiers.json"
         remember_rates(store, movie, 0.2, dict.fromkeys(tier.name for tier in quality.LADDER))
-        argv = [str(movie), "--duration", "0.2", "--tier-cache", str(store)]
+        argv = [*plain(movie), "--duration", "0.2", "--tier-cache", str(store)]
 
         # Act
         code = cartridge.main([*argv, "--build-dir", str(tmp_path / "out")])

@@ -29,19 +29,6 @@ def _both_halves(epoch: int, colors: np.ndarray) -> np.ndarray:
     return both
 
 
-def _tied_run(errors: dict[int, float], best: int) -> set[int]:
-    run = {best}
-    step = best
-    while step - 1 in errors and abs(errors[step - 1] - errors[best]) <= _TIE:
-        step -= 1
-        run.add(step)
-    step = best
-    while step + 1 in errors and abs(errors[step + 1] - errors[best]) <= _TIE:
-        step += 1
-        run.add(step)
-    return run
-
-
 class Movie(NamedTuple):
     stream: bytes
     offsets: tuple[int, ...]
@@ -104,7 +91,7 @@ def _search(
 
 
 def _ambiguous(found: Search, best_frame: int, separation: float) -> bool:
-    run = _tied_run(found.scored, best_frame)
+    run = vc.tied_run(found.scored, best_frame)
     rivals = {step: error for step, error in found.scored.items() if step not in run}
     if not rivals:
         return False

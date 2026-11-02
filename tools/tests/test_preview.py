@@ -34,6 +34,26 @@ class TestPreviewWriter:
         assert np.array_equal(decoded[0], neocolor.color_index_to_rgb(frame))
 
     @pytest.mark.ffmpeg
+    def test_frames_past_the_checked_ones_are_still_written(self, tmp_path):
+        # Arrange
+        shape = (encode.FRAME_HEIGHT, encode.FRAME_WIDTH)
+        path = tmp_path / "long.mkv"
+        writer = preview.PreviewWriter(path)
+        for level in range(preview.CHECKED_FRAMES + 1):
+            writer.write(np.full(shape, level, dtype=np.uint16))
+
+        # Act
+        writer.close()
+
+        # Assert
+        raw = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", str(path), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+            capture_output=True,
+            check=True,
+        ).stdout
+        assert len(raw) == (preview.CHECKED_FRAMES + 1) * shape[0] * shape[1] * 3
+
+    @pytest.mark.ffmpeg
     def test_an_mp4_preview_is_enlarged_and_checked(self, tmp_path):
         # Arrange
         rng = np.random.default_rng(7)

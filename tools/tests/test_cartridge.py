@@ -14,6 +14,7 @@ from tests.cartridgehelp import (
     fake_host_compiler,
     header,
     last_report,
+    plain,
     preview_pixels,
     remember_rates,
     short_clip,
@@ -65,7 +66,7 @@ class TestSourceValidation:
 
     def test_a_missing_subtitle_file_is_named_in_the_error(self, movie, tmp_path, capsys):
         # Arrange
-        argv = [str(movie), "--subtitles", str(tmp_path / "absent.srt")]
+        argv = [*plain(movie), "--subtitles", str(tmp_path / "absent.srt")]
 
         # Act
         code = cartridge.main(argv)
@@ -89,7 +90,7 @@ class TestSourceValidation:
 class TestANamedRung:
     def test_the_whole_film_is_baked_when_no_trim_is_given(self, movie, tmp_path, capsys):
         # Arrange
-        argv = [str(movie), "--quality", "q17", "--build-dir", str(tmp_path / "out")]
+        argv = [*plain(movie), "--quality", "q17", "--build-dir", str(tmp_path / "out")]
 
         # Act
         code = cartridge.main([*argv, "--bake-only"])
@@ -102,7 +103,7 @@ class TestANamedRung:
         # Arrange
         build = tmp_path / "out"
         window = ["--start", "0.6", "--duration", "0.25", "--preview", str(tmp_path / "p.mkv")]
-        argv = [str(two_tone), "--quality", "q20", "--build-dir", str(build), *window]
+        argv = [*plain(two_tone), "--quality", "q20", "--build-dir", str(build), *window]
 
         # Act
         code = cartridge.main([*argv, "--bake-only"])
@@ -116,7 +117,7 @@ class TestANamedRung:
     def test_an_explicit_subtitle_file_reaches_the_bake(self, movie, captions, tmp_path):
         # Arrange
         build = tmp_path / "out"
-        argv = [str(movie), "--quality", "q17", "--subtitles", str(captions)]
+        argv = [*plain(movie), "--quality", "q17", "--subtitles", str(captions)]
 
         # Act
         code = cartridge.main([*argv, "--build-dir", str(build), "--bake-only"])
@@ -137,7 +138,7 @@ class TestCartridgeBuild:
         (out / cartridge.CARTRIDGE_NAME).write_bytes(bytes(fake.random_int(1, 64)))
 
         # Act
-        code = cartridge.main([str(movie), "--quality", "q17", "--build-dir", str(out)])
+        code = cartridge.main([*plain(movie), "--quality", "q17", "--build-dir", str(out)])
 
         # Assert
         assert code == 0
@@ -153,7 +154,7 @@ class TestCartridgeBuild:
         out = tmp_path / "out"
 
         # Act
-        code = cartridge.main([str(movie), "--quality", "q17", "--build-dir", str(out)])
+        code = cartridge.main([*plain(movie), "--quality", "q17", "--build-dir", str(out)])
 
         # Assert
         assert code == 0
@@ -163,7 +164,7 @@ class TestCartridgeBuild:
         # Arrange
         status = fake.random_int(1, 100)
         fake_docker(monkeypatch, tmp_path, status=status)
-        argv = [str(movie), "--quality", "q17", "--build-dir", str(tmp_path / "out")]
+        argv = [*plain(movie), "--quality", "q17", "--build-dir", str(tmp_path / "out")]
 
         # Act
         code = cartridge.main(argv)
@@ -175,7 +176,7 @@ class TestCartridgeBuild:
     def test_bake_only_stops_before_the_build(self, movie, tmp_path, monkeypatch):
         # Arrange
         log = fake_docker(monkeypatch, tmp_path)
-        argv = [str(movie), "--quality", "q17", "--build-dir", str(tmp_path / "out")]
+        argv = [*plain(movie), "--quality", "q17", "--build-dir", str(tmp_path / "out")]
 
         # Act
         code = cartridge.main([*argv, "--bake-only"])
@@ -187,7 +188,7 @@ class TestCartridgeBuild:
     def test_a_failed_bake_skips_the_build(self, movie, tmp_path, monkeypatch):
         # Arrange
         log = fake_docker(monkeypatch, tmp_path)
-        argv = [str(movie), "--quality", "q17", "--duration", PAST_THE_END]
+        argv = [*plain(movie), "--quality", "q17", "--duration", PAST_THE_END]
 
         # Act
         code = cartridge.main([*argv, "--build-dir", str(tmp_path / "out")])
@@ -204,7 +205,7 @@ class TestSearchingFromRememberedRungs:
         remember_rates(store, movie, 0.2, every_rung_refused())
 
         # Act
-        cartridge.main([str(movie), "--duration", "0.2", "--tier-cache", str(store)])
+        cartridge.main([*plain(movie), "--duration", "0.2", "--tier-cache", str(store)])
 
         # Assert
         assert "settled entirely from remembered measurements" in capsys.readouterr().err
@@ -215,7 +216,7 @@ class TestSearchingFromRememberedRungs:
         # Arrange
         store = tmp_path / "tiers.json"
         remember_rates(store, movie, 0.2, every_rung_refused())
-        argv = [str(movie), "--duration", "0.2", "--tier-cache", str(store)]
+        argv = [*plain(movie), "--duration", "0.2", "--tier-cache", str(store)]
 
         # Act
         code = cartridge.main([*argv, "--build-dir", str(tmp_path / "out")])
@@ -234,7 +235,7 @@ class TestSearchingFromRememberedRungs:
         refused = dict.fromkeys(tier.name for tier in quality.LADDER[:30])
         fitting = {tier.name: rate for tier in quality.LADDER[31:]}
         remember_rates(store, movie, 0.2, {**refused, **fitting})
-        argv = [str(movie), "--duration", "0.2", "--tier-cache", str(store), "--denoise", "0"]
+        argv = [*plain(movie), "--duration", "0.2", "--tier-cache", str(store), "--denoise", "0"]
 
         # Act
         code = cartridge.main([*argv, "--build-dir", str(tmp_path / "out"), "--bake-only"])
@@ -249,7 +250,7 @@ class TestMeasuringARung:
     def test_a_finished_bake_becomes_a_rate(self, movie, tmp_path):
         # Arrange
         store = tmp_path / "tiers.json"
-        argv = [str(movie), "--duration", "0.2", "--tier-cache", str(store), "--denoise", "0"]
+        argv = [*plain(movie), "--duration", "0.2", "--tier-cache", str(store), "--denoise", "0"]
 
         # Act
         cartridge.main([*argv, "--build-dir", str(tmp_path / "out"), "--bake-only"])
@@ -267,7 +268,7 @@ class TestMeasuringARung:
         store = tmp_path / "tiers.json"
         rest = {tier.name: None for tier in quality.LADDER[2:]}
         key = remember_rates(store, movie, float(PAST_THE_END), rest)
-        argv = [str(movie), "--duration", PAST_THE_END, "--tier-cache", str(store)]
+        argv = [*plain(movie), "--duration", PAST_THE_END, "--tier-cache", str(store)]
 
         # Act
         code = cartridge.main([*argv, "--build-dir", str(tmp_path / "out"), "--bake-only"])
@@ -318,7 +319,7 @@ class TestReadingAProbeReport:
 class TestDenoise:
     def test_a_number_is_forwarded_to_the_bake(self, movie, tmp_path, capsys):
         # Arrange
-        argv = [str(movie), "--quality", "q17", "--denoise", "2"]
+        argv = [*plain(movie), "--quality", "q17", "--denoise", "2"]
 
         # Act
         cartridge.main([*argv, "--build-dir", str(tmp_path / "out"), "--bake-only"])
@@ -328,7 +329,7 @@ class TestDenoise:
 
     def test_a_named_rung_measures_nothing_unless_asked(self, movie, tmp_path, capsys):
         # Arrange
-        argv = [str(movie), "--quality", "q17", "--build-dir", str(tmp_path / "out")]
+        argv = [*plain(movie), "--quality", "q17", "--build-dir", str(tmp_path / "out")]
 
         # Act
         cartridge.main([*argv, "--bake-only"])
@@ -340,7 +341,7 @@ class TestDenoise:
 
     def test_a_negative_strength_is_refused(self, movie):
         # Arrange
-        argv = [str(movie), "--denoise", "-1"]
+        argv = [*plain(movie), "--denoise", "-1"]
 
         # Act
         with pytest.raises(SystemExit) as refused:
@@ -351,7 +352,15 @@ class TestDenoise:
 
     def test_auto_measures_the_strength_on_the_film(self, tmp_path, capsys):
         # Arrange
-        argv = [str(SYNTHETIC_FILM), "--quality", "q17", "--denoise", "auto", "--duration", "0.5"]
+        argv = [
+            *plain(SYNTHETIC_FILM),
+            "--quality",
+            "q17",
+            "--denoise",
+            "auto",
+            "--duration",
+            "0.5",
+        ]
 
         # Act
         cartridge.main([*argv, "--build-dir", str(tmp_path), "--bake-only"])

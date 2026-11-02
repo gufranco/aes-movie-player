@@ -87,6 +87,19 @@ class TestWindowBounds:
         assert found == painted
 
 
+class TestAWindowPastTheFilm:
+    def test_a_capture_later_than_the_film_finds_no_frame(self, measure_drift, tmp_path, capsys):
+        # Arrange
+        baked = movie(tmp_path, {4: MATCH})
+        capture = shot(tmp_path, MATCH)
+
+        # Act
+        found = measure_drift.measure(baked, capture, 100, window=5, overscan=OVERSCAN)
+
+        # Assert
+        assert (found, "best match" in capsys.readouterr().out) == (None, False)
+
+
 class TestExitCode:
     @pytest.mark.parametrize(
         ("painted", "code"),
@@ -112,6 +125,17 @@ class TestTiedMatches:
     def test_a_tie_resolves_to_the_frame_nearest_the_expected_one(self, measure_drift, tmp_path):
         # Arrange
         baked = movie(tmp_path, dict.fromkeys(range(1, FRAMES), MATCH))
+        capture = shot(tmp_path, MATCH)
+
+        # Act
+        found = measure_drift.measure(baked, capture, 5, window=5, overscan=OVERSCAN)
+
+        # Assert
+        assert found == 5
+
+    def test_a_film_that_matches_everywhere_has_no_rival(self, measure_drift, tmp_path):
+        # Arrange
+        baked = movie(tmp_path, dict.fromkeys(range(FRAMES), MATCH))
         capture = shot(tmp_path, MATCH)
 
         # Act

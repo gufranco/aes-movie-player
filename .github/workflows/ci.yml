@@ -114,7 +114,7 @@ jobs:
             --cov=tools/scripts \
             --cov-config=tools/pyproject.toml \
             --cov-report=term-missing \
-            --cov-fail-under=95
+            --cov-fail-under=100
 
       - name: The committed tier file is not a test artefact
         run: git diff --exit-code -- neogeomedia-tiers.json

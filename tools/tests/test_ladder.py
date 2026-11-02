@@ -213,7 +213,7 @@ class TestMeasuringOnePoint:
 
         # Act
         measured = ladder.measure_point(
-            clip, chroma_weight=0.37, tolerance=0.0018, frame_hold=2, seed=0
+            clip, chroma_weight=0.37, tolerance=0.0018, frame_hold=2, seed=0, dither=0.0
         )
 
         # Assert
@@ -233,7 +233,7 @@ class TestSweepingAFilm:
         source = SYNTHETIC_FILM
 
         # Act
-        points = ladder.sweep(source, count=1, seconds=0.05)
+        points = ladder.sweep(source, count=1, seconds=0.05, dither=0.0)
 
         # Assert
         assert [entry.chroma_weight for entry in points] == [*SWEEP_CHROMA, *[0.08] * 5]
