@@ -132,7 +132,7 @@ wheels = [
 
 [[package]]
 name = "fmvcore"
-version = "1.2.0"
+version = "1.4.1"
 source = { editable = "../fmv-core-python" }
 dependencies = [
     { name = "numpy" },

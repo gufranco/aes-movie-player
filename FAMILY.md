@@ -70,6 +70,10 @@ the requirement.
   one.
 - **The picture fills the screen.** A source of any shape is scaled until it
   covers the console's raster and then cropped, so a wide film loses its sides.
+  The crop follows the shape a television shows, pixel shape included: a
+  player crops to the raster's displayed aspect, never to its pixel count,
+  so a circle in the film stays round on the console. A console whose pixel
+  shape no source gives is taken as square.
   Black bars baked into a source file are detected and cropped before scaling.
   No player adds letterboxing or padding, because bars cost tiles and transfer
   like any other picture.
@@ -291,6 +295,11 @@ That choice has a price, paid deliberately:
   a capture from the emulator running it, or the replay oracle's drawing of
   that stream once a headless capture has matched it pixel for pixel
   outside the player's overlay. It is never a render of the baker's preview.
+- **A preview video plays everywhere and keeps every pixel.** A baker's
+  `.mp4` preview goes through `fmvcore.video`: near-lossless H.264 High at an
+  even nearest-neighbour enlargement, checked to decode back within the bound
+  measured over the console's whole colour set, 5 levels unless a player
+  measured more; a `.mkv` is lossless FFV1.
 - **A player's demos match frame for frame.** When a player carries more
   than one console, every console's demo is baked from the same window of
   the demo film with the same settings, drawn the same way and cut to the

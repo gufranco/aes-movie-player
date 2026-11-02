@@ -297,7 +297,7 @@ That measures the source, settles the highest quality rung that fits a cartridge
 | `--quality q17` | Name a rung and skip the measuring |
 | `--denoise 1` | A denoise strength. With the default search it is measured on the film, and `auto` measures it for a named rung too |
 | `--start 90 --duration 300` | Take five minutes starting at 1:30 rather than the whole file |
-| `--preview out.mp4` | Also render what the cartridge will show, for checking by eye. A `.png` holds four frames beside their source instead |
+| `--preview out.mp4` | Also render what the cartridge will show, for checking by eye: enlarged six times with every pixel kept sharp, in a form every phone and computer plays. A `.mkv` is lossless at the console's size, and a `.png` holds four frames beside their source instead |
 | `--silent` | Leave sound out. Sound has its own ROM, so the picture gains no room |
 | `--seek-every 10` | Seconds between the points C and D jump to. At least one frame |
 | `--dither 0.5` | An ordered dither strength from 0 to 1. Default: 1, full strength; 0 bakes fastest, with no dither |

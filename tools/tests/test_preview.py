@@ -5,30 +5,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from fmvcore import video
 
 from neogeomedia import encode, neocolor, preview
-
-
-class TestPreviewCodec:
-    def test_matroska_previews_are_lossless(self):
-        # Arrange
-        path = Path("out.mkv")
-
-        # Act
-        codec = preview.preview_codec(path)
-
-        # Assert
-        assert "ffv1" in codec
-
-    def test_other_containers_use_h264(self):
-        # Arrange
-        path = Path("out.mp4")
-
-        # Act
-        codec = preview.preview_codec(path)
-
-        # Assert
-        assert "libx264" in codec
 
 
 class TestPreviewWriter:
@@ -53,6 +32,39 @@ class TestPreviewWriter:
         ).stdout
         decoded = np.frombuffer(raw, np.uint8).reshape(-1, *shape, 3)
         assert np.array_equal(decoded[0], neocolor.color_index_to_rgb(frame))
+
+    @pytest.mark.ffmpeg
+    def test_an_mp4_preview_is_enlarged_and_checked(self, tmp_path):
+        # Arrange
+        rng = np.random.default_rng(7)
+        shape = (encode.FRAME_HEIGHT, encode.FRAME_WIDTH)
+        path = tmp_path / "preview.mp4"
+        writer = preview.PreviewWriter(path)
+        writer.write(rng.integers(0, 1 << 15, size=shape, dtype=np.uint16))
+
+        # Act
+        writer.close()
+
+        # Assert
+        factor = video.enlargement(preview.PICTURE)
+        size = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "csv=p=0",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert size == f"{encode.FRAME_WIDTH * factor},{encode.FRAME_HEIGHT * factor}"
 
     @pytest.mark.ffmpeg
     def test_a_preview_ffmpeg_cannot_write_is_an_error(self, tmp_path):

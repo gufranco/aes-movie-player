@@ -7,6 +7,7 @@ from typing import Final
 
 import numpy as np
 import numpy.typing as npt
+from fmvcore import video
 
 from neogeomedia import encode, frames, neocolor
 
@@ -14,46 +15,32 @@ PREVIEW_FRAMES: Final = 4
 STILL_SUFFIX: Final = ".png"
 
 
-def preview_codec(path: Path) -> list[str]:
-    if path.suffix.lower() == ".mkv":
-        return ["-c:v", "ffv1", "-level", "3", "-pix_fmt", "rgb24"]
-    return ["-c:v", "libx264", "-preset", "medium", "-crf", "16", "-pix_fmt", "yuv420p"]
-
-
-def _writer_command(path: Path) -> list[str]:
-    rate = frames.VBLANK_FPS
-    return [
-        "ffmpeg",
-        "-v",
-        "error",
-        "-y",
-        "-f",
-        "rawvideo",
-        "-pix_fmt",
-        "rgb24",
-        "-s",
-        f"{encode.FRAME_WIDTH}x{encode.FRAME_HEIGHT}",
-        "-r",
-        f"{rate.numerator}/{rate.denominator}",
-        "-i",
-        "-",
-        *preview_codec(path),
-        str(path),
-    ]
+MOST_DRIFT: Final = 7
+PICTURE: Final = video.Picture(
+    width=encode.FRAME_WIDTH,
+    height=encode.FRAME_HEIGHT,
+    rate=frames.VBLANK_FPS,
+    most_drift=MOST_DRIFT,
+)
+CHECKED_FRAMES: Final = 60
 
 
 class PreviewWriter:
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._process = subprocess.Popen(_writer_command(path), stdin=subprocess.PIPE)
+        self._process = subprocess.Popen(video.writer_command(path, PICTURE), stdin=subprocess.PIPE)
         self._path = path
+        self._kept: tuple[npt.NDArray[np.uint8], ...] = ()
 
     def watch(self, chunks: Iterable[npt.NDArray[np.uint8]]) -> Iterable[npt.NDArray[np.uint8]]:
         return chunks
 
     def write(self, frame: np.ndarray) -> None:
         assert self._process.stdin is not None
-        self._process.stdin.write(neocolor.color_index_to_rgb(frame).astype(np.uint8).tobytes())
+        shown = neocolor.color_index_to_rgb(frame).astype(np.uint8)
+        if len(self._kept) < CHECKED_FRAMES:
+            self._kept = (*self._kept, shown)
+        self._process.stdin.write(shown.tobytes())
 
     def close(self) -> None:
         assert self._process.stdin is not None
@@ -61,6 +48,7 @@ class PreviewWriter:
         if self._process.wait() != 0:
             msg = f"ffmpeg failed to write the preview at {self._path}"
             raise RuntimeError(msg)
+        video.check(self._path, PICTURE, list(self._kept))
 
 
 def picks(total: int) -> tuple[int, ...]:

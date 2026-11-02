@@ -1265,17 +1265,18 @@ Write a viewable copy of what the cartridge will show.
 The preview output re-encodes the decoded picture at the vblank rate, so
 the quantization can be judged in motion without booting a cart.
 
-#### `preview_codec`
-
-Lossless for .mkv, viewable h264 otherwise.
-
-A lossy preview layers its own artifacts on top of the quantizer's,
-which is exactly what a quality judgement must not do, so the
-verification path writes FFV1 and only the shareable copy is h264.
-
 #### `PreviewWriter`
 
-Feeds rendered frames to ffmpeg as they are produced.
+Feeds rendered frames to ffmpeg as they are produced, through the core's
+`fmvcore.video`: lossless FFV1 for a `.mkv`, and for anything else
+near-lossless H.264 every phone and computer plays, each console pixel
+enlarged six times with nearest neighbour, the largest even factor H.264
+level 5.1 holds for 320 by 224 at the vblank rate. A lossy preview at the
+console's size halves the colour resolution and smears the dither it
+exists to show. The writer keeps the first 60 frames and, once ffmpeg is
+done, checks the file decodes back within 7 levels of them: all 65,536
+Neo Geo colours, packed with shuffled neighbours, come back within 6, the
+8-bit 4:2:0 conversion itself.
 
 #### `StillWriter`
 
