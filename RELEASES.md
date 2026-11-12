@@ -1,3 +1,10 @@
+## [3.3.2](https://github.com/gufranco/neogeo-media-player/compare/v3.3.1...v3.3.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **docker:** fetch superseded ngdevkit builds ([#16](https://github.com/gufranco/neogeo-media-player/issues/16)) ([edc2b5d](https://github.com/gufranco/neogeo-media-player/commit/edc2b5dcb2f3f33425ce54bdf304bd3b994e2780))
+
 ## [3.3.1](https://github.com/gufranco/neogeo-media-player/compare/v3.3.0...v3.3.1) (2026-11-02)
 
 
