@@ -8,6 +8,7 @@ RUN printf 'Acquire::Retries "8";\nAcquire::http::Timeout "60";\nAcquire::https:
 
 ARG UBUNTU_SNAPSHOT=20261014T000000Z
 ARG PPA_POOL=https://ppa.launchpadcontent.net/dciabrin/ngdevkit/ubuntu/pool/main/n
+ARG PPA_FILES=https://launchpad.net/~dciabrin/+archive/ubuntu/ngdevkit/+files
 ARG NGDEVKIT_TOOLCHAIN=ngdevkit-toolchain/ngdevkit-toolchain_0.1%2b202606181616-15%7eubuntu26.04.1_amd64.deb
 ARG NGDEVKIT=ngdevkit/ngdevkit_0.5%2b202610171524-17%7eubuntu26.04.1_amd64.deb
 ARG NGDEVKIT_GNGEO=ngdevkit-gngeo/ngdevkit-gngeo_0.8.1%2b202607271849-11%7eubuntu26.04.1_amd64.deb
@@ -35,9 +36,13 @@ WORKDIR /tmp/ngdevkit
 COPY toolchain/ngdevkit.sha256 ngdevkit.sha256
 
 # hadolint ignore=DL3008
-RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o ngdevkit-toolchain.deb "${PPA_POOL}/${NGDEVKIT_TOOLCHAIN}" \
- && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o ngdevkit.deb "${PPA_POOL}/${NGDEVKIT}" \
- && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o ngdevkit-gngeo.deb "${PPA_POOL}/${NGDEVKIT_GNGEO}" \
+RUN fetch_deb() { \
+      curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$1" "${PPA_POOL}/$2" \
+      || curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$1" "${PPA_FILES}/${2#*/}"; \
+    } \
+ && fetch_deb ngdevkit-toolchain.deb "${NGDEVKIT_TOOLCHAIN}" \
+ && fetch_deb ngdevkit.deb "${NGDEVKIT}" \
+ && fetch_deb ngdevkit-gngeo.deb "${NGDEVKIT_GNGEO}" \
  && sha256sum --check --strict ngdevkit.sha256 \
  && apt-get update --snapshot "${UBUNTU_SNAPSHOT}" \
  && apt-get install -y --no-install-recommends --snapshot "${UBUNTU_SNAPSHOT}" \
